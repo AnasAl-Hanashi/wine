@@ -1264,6 +1264,7 @@ INSTALL_LIB = \
 	windows.globalization.winmd \
 	windows.graphics.winmd \
 	windows.media.winmd \
+	windows.networking.connectivity.winmd \
 	windows.networking.winmd \
 	windows.perception.winmd \
 	windows.storage.winmd \
