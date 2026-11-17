@@ -2576,6 +2576,86 @@ static unsigned int get_cached_dir_data( HANDLE handle, struct dir_data **data_r
 }
 
 
+/* PIPEFIX: test hack, the pipe directory has no unix fd, so emulate a lookup of one literal name */
+static NTSTATUS pipefix_query_dir( HANDLE handle, FILE_INFORMATION_CLASS info_class, void *buffer,
+                                   ULONG length, UNICODE_STRING *mask, IO_STATUS_BLOCK *io )
+{
+    struct pipefix_wait { LARGE_INTEGER timeout; ULONG name_len; BOOLEAN specified; WCHAR name[256]; } wreq;
+    IO_STATUS_BLOCK wio;
+    ULONG i, count, need;
+    unsigned int st;
+
+    if (!mask || !mask->Length) return STATUS_NO_MORE_FILES;  /* continuation of the one-entry listing */
+    if (mask->Length >= 500) return STATUS_BAD_DEVICE_TYPE;
+    count = mask->Length / sizeof(WCHAR);
+    for (i = 0; i < count; i++) if (mask->Buffer[i] == '*' || mask->Buffer[i] == '?') return STATUS_BAD_DEVICE_TYPE;
+
+    switch (info_class)
+    {
+    case FileDirectoryInformation:     need = offsetof( FILE_DIRECTORY_INFORMATION, FileName ); break;
+    case FileFullDirectoryInformation: need = offsetof( FILE_FULL_DIRECTORY_INFORMATION, FileName ); break;
+    case FileBothDirectoryInformation: need = offsetof( FILE_BOTH_DIRECTORY_INFORMATION, FileName ); break;
+    case FileNamesInformation:         need = offsetof( FILE_NAMES_INFORMATION, FileName ); break;
+    default: return STATUS_BAD_DEVICE_TYPE;
+    }
+    need += mask->Length;
+
+    memset( &wreq, 0, sizeof(wreq) );
+    wreq.timeout.QuadPart = -10000;
+    wreq.name_len = mask->Length;
+    wreq.specified = TRUE;
+    memcpy( wreq.name, mask->Buffer, mask->Length );
+    st = NtFsControlFile( handle, 0, NULL, NULL, &wio, 0x110018 /* FSCTL_PIPE_WAIT */,
+                          &wreq, offsetof( struct pipefix_wait, name ) + mask->Length, NULL, 0 );
+    TRACE("PIPEFIX class=%u wait st=%08x\n", (unsigned)info_class, st);
+    if (st != STATUS_SUCCESS && st != STATUS_IO_TIMEOUT) return STATUS_NO_SUCH_FILE;
+    if (length < need)
+    {
+        TRACE("PIPEFIX overflow length=%u need=%u\n", (unsigned)length, (unsigned)need);
+        return STATUS_BUFFER_OVERFLOW;
+    }
+
+    memset( buffer, 0, need );
+    switch (info_class)
+    {
+    case FileDirectoryInformation:
+    {
+        FILE_DIRECTORY_INFORMATION *info = buffer;
+        info->FileAttributes = FILE_ATTRIBUTE_NORMAL;
+        info->FileNameLength = mask->Length;
+        memcpy( info->FileName, mask->Buffer, mask->Length );
+        break;
+    }
+    case FileFullDirectoryInformation:
+    {
+        FILE_FULL_DIRECTORY_INFORMATION *info = buffer;
+        info->FileAttributes = FILE_ATTRIBUTE_NORMAL;
+        info->FileNameLength = mask->Length;
+        memcpy( info->FileName, mask->Buffer, mask->Length );
+        break;
+    }
+    case FileBothDirectoryInformation:
+    {
+        FILE_BOTH_DIRECTORY_INFORMATION *info = buffer;
+        info->FileAttributes = FILE_ATTRIBUTE_NORMAL;
+        info->FileNameLength = mask->Length;
+        memcpy( info->FileName, mask->Buffer, mask->Length );
+        break;
+    }
+    default:
+    {
+        FILE_NAMES_INFORMATION *info = buffer;
+        info->FileNameLength = mask->Length;
+        memcpy( info->FileName, mask->Buffer, mask->Length );
+        break;
+    }
+    }
+    io->Status = STATUS_SUCCESS;
+    io->Information = need;
+    return STATUS_SUCCESS;
+}
+
+
 /******************************************************************************
  *              NtQueryDirectoryFile   (NTDLL.@)
  */
@@ -2626,7 +2706,12 @@ NTSTATUS WINAPI NtQueryDirectoryFile( HANDLE handle, HANDLE event, PIO_APC_ROUTI
     if (!buffer) return STATUS_ACCESS_VIOLATION;
 
     if ((status = server_get_unix_fd( handle, FILE_LIST_DIRECTORY, &fd, &needs_close, &type, NULL )))
+    {
+        /* PIPEFIX: see pipefix_query_dir */
+        if (status == STATUS_BAD_DEVICE_TYPE)
+            return pipefix_query_dir( handle, info_class, buffer, length, mask, io );
         return status;
+    }
 
     if (type != FD_TYPE_DIR)
     {

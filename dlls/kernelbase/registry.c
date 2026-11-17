@@ -3210,32 +3210,48 @@ cleanup:
  * RegLoadAppKeyA (kernelbase.@)
  *
  */
-LSTATUS WINAPI RegLoadAppKeyA(const char *file, HKEY *result, REGSAM sam, DWORD options, DWORD reserved)
+LSTATUS WINAPI RegLoadAppKeyA( const char *filename, HKEY *result, REGSAM sam, DWORD options, DWORD reserved )
 {
-    FIXME("%s %p %lu %lu %lu: stub\n", wine_dbgstr_a(file), result, sam, options, reserved);
+    UNICODE_STRING filenameW;
+    LSTATUS ret;
 
-    if (!file || reserved)
-        return ERROR_INVALID_PARAMETER;
-
-    *result = (HKEY)0xdeadbeef;
-    return ERROR_SUCCESS;
+    if (!filename) return ERROR_INVALID_PARAMETER;
+    if (!RtlCreateUnicodeStringFromAsciiz( &filenameW, filename )) return ERROR_NOT_ENOUGH_MEMORY;
+    ret = RegLoadAppKeyW( filenameW.Buffer, result, sam, options, reserved );
+    RtlFreeUnicodeString( &filenameW );
+    return ret;
 }
 
-/******************************************************************************
- * RegLoadAppKeyW (kernelbase.@)
- *
+/***********************************************************************
+ *      RegLoadAppKeyW (kernelbase.@)
  */
-LSTATUS WINAPI RegLoadAppKeyW(const WCHAR *file, HKEY *result, REGSAM sam, DWORD options, DWORD reserved)
+LSTATUS WINAPI RegLoadAppKeyW( const WCHAR *filename, HKEY *result, REGSAM sam, DWORD options, DWORD reserved )
 {
-    FIXME("%s %p %lu %lu %lu: stub\n", wine_dbgstr_w(file), result, sam, options, reserved);
+    static const WCHAR rootW[] = L"Software\\Wine\\AppHives";
+    static const char hex[] = "0123456789abcdef";
+    WCHAR name[9];
+    DWORD hash = 2166136261u;
+    const WCHAR *p;
+    HKEY root;
+    LSTATUS ret;
+    int i;
 
-    if (!file || reserved)
-        return ERROR_INVALID_PARAMETER;
+    FIXME( "%s %p %lu %lu %lu: semi-stub, hive file is neither read nor saved\n",
+           wine_dbgstr_w(filename), result, sam, options, reserved );
 
-    *result = (HKEY)0xdeadbeef;
-    return ERROR_SUCCESS;
+    if (!filename || !result || reserved) return ERROR_INVALID_PARAMETER;
+
+    for (p = filename; *p; p++) hash = (hash ^ *p) * 16777619u;
+    for (i = 0; i < 8; i++) name[i] = hex[(hash >> (28 - i * 4)) & 0xf];
+    name[8] = 0;
+
+    if ((ret = RegCreateKeyExW( HKEY_LOCAL_MACHINE, rootW, 0, NULL, REG_OPTION_NON_VOLATILE,
+                                KEY_ALL_ACCESS, NULL, &root, NULL ))) return ret;
+    ret = RegCreateKeyExW( root, name, 0, NULL, REG_OPTION_NON_VOLATILE,
+                           sam ? sam : KEY_ALL_ACCESS, NULL, result, NULL );
+    RegCloseKey( root );
+    return ret;
 }
-
 
 /***********************************************************************
  * DnsHostnameToComputerNameExW   (kernelbase.@)

@@ -357,6 +357,7 @@ static void named_pipe_destroy( struct object *obj)
 
     assert( list_empty( &pipe->listeners ) );
     assert( !pipe->instances );
+    /* PIPEFIX2 */ async_wake_up( &pipe->waiters, STATUS_OBJECT_NAME_NOT_FOUND );
     free_async_queue( &pipe->waiters );
 }
 

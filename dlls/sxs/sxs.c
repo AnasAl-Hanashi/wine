@@ -160,7 +160,16 @@ BOOL WINAPI SxsLookupClrGuid(DWORD flags, GUID *clsid, HANDLE actctx, void *buff
         const struct comclassredirect_data *redirect_data = guid_info.lpData;
         const struct clrclass_data *class_data;
 
+        /* SXSFIX */ ERR("lookup clsid %s clrdata_offset %lu\n", debugstr_guid(clsid), (unsigned long)redirect_data->clrdata_offset);
+        if (!redirect_data->clrdata_offset)
+        {
+            SetLastError(ERROR_SXS_KEY_NOT_FOUND);
+            retval = FALSE;
+            goto out;
+        }
         class_data = (void *)((char *)redirect_data + redirect_data->clrdata_offset);
+        /* SXSDBG */ ERR("class: flags %#lx lpData %p ulLength %lu\n", (unsigned long)flags, guid_info.lpData, (unsigned long)guid_info.ulLength);
+        /* SXSDBG */ ERR("class: clrdata_offset %lu name_offset %lu name_len %lu\n", (unsigned long)redirect_data->clrdata_offset, (unsigned long)class_data->name_offset, (unsigned long)class_data->name_len);
         ptr_name = (char *)class_data + class_data->name_offset;
         ptr_version = (char *)class_data + class_data->version_offset;
         len_name = class_data->name_len + sizeof(WCHAR);
@@ -170,6 +179,7 @@ BOOL WINAPI SxsLookupClrGuid(DWORD flags, GUID *clsid, HANDLE actctx, void *buff
     else
     {
         const struct clrsurrogate_data *surrogate = guid_info.lpData;
+        /* SXSDBG */ ERR("surrogate: flags %#lx lpData %p ulLength %lu name_offset %lu name_len %lu\n", (unsigned long)flags, guid_info.lpData, (unsigned long)guid_info.ulLength, (unsigned long)surrogate->name_offset, (unsigned long)surrogate->name_len);
         ptr_name = (char *)surrogate + surrogate->name_offset;
         ptr_version = (char *)surrogate + surrogate->version_offset;
         len_name = surrogate->name_len + sizeof(WCHAR);
