@@ -322,6 +322,15 @@ static bool named_pipe_init( struct object *obj, const void *init_data )
     pipe->sharing      = data->sharing;
     init_async_queue( &pipe->waiters );
     list_init( &pipe->listeners );
+
+    if (!obj->sd && current && current->process && current->process->token)
+    {
+        static const struct security_descriptor empty_sd;
+        if (!default_set_sd( obj, &empty_sd, OWNER_SECURITY_INFORMATION |
+                                             GROUP_SECURITY_INFORMATION |
+                                             DACL_SECURITY_INFORMATION ))
+            return false;
+    }
     return true;
 }
 
