@@ -2130,7 +2130,9 @@ static void set_window_region( struct window *win, struct region *region, int re
 static bool is_dpi_awareness_compatible( struct window *win, struct window *other )
 {
     unsigned int awareness = NTUSER_DPI_CONTEXT_GET_AWARENESS( win->shared->dpi_context );
-    return awareness == NTUSER_DPI_CONTEXT_GET_AWARENESS( other->shared->dpi_context );
+    unsigned int other_awareness = NTUSER_DPI_CONTEXT_GET_AWARENESS( other->shared->dpi_context );
+    if (other_awareness == DPI_AWARENESS_PER_MONITOR_AWARE) return true;
+    return awareness == other_awareness;
 }
 
 
