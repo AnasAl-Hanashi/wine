@@ -680,6 +680,7 @@ struct x11drv_win_data
     HWND        hwnd;           /* hwnd that this private data belongs to */
     Window      whole_window;   /* X window for the complete window */
     Window      client_window;  /* X window for the client area */
+    UINT        offscreen_surfaces; /* number of active offscreen client surfaces */
     struct window_rects rects;  /* window rects in monitor DPI, relative to parent client area */
     struct host_window *parent; /* the host window parent, frame or embedder, NULL if root_window */
     XIC         xic;            /* X input context */

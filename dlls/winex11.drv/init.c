@@ -282,6 +282,8 @@ static void x11drv_client_surface_detach( struct client_surface *client )
 
     if ((data = get_win_data( hwnd )))
     {
+        if (InterlockedExchange( &surface->client.offscreen, FALSE ) && data->offscreen_surfaces)
+            data->offscreen_surfaces--;
         detach_client_window( data, client_window );
         release_win_data( data );
     }
@@ -314,6 +316,11 @@ static void client_surface_update_offscreen( HWND hwnd, struct x11drv_client_sur
 {
     BOOL offscreen = needs_offscreen_rendering( hwnd, surface->client.raw );
     struct x11drv_win_data *data;
+
+    /* Keep offscreen compositing active while child windows still exist (e.g. hidden
+     * hosted panes on tab switch) to avoid XComposite redirect/unredirect flicker. */
+    if (!offscreen && surface->client.offscreen && NtUserGetWindowRelative( hwnd, GW_CHILD ))
+        offscreen = TRUE;
 
     if (InterlockedExchange( &surface->client.offscreen, offscreen ) == offscreen)
     {
@@ -363,8 +370,16 @@ static void client_surface_update_offscreen( HWND hwnd, struct x11drv_client_sur
 
     if ((data = get_win_data( hwnd )))
     {
-        if (offscreen) detach_client_window( data, surface->window );
-        else attach_client_window( data, surface->window );
+        if (offscreen)
+        {
+            data->offscreen_surfaces++;
+            detach_client_window( data, surface->window );
+        }
+        else
+        {
+            if (data->offscreen_surfaces) data->offscreen_surfaces--;
+            if (!data->client_window) attach_client_window( data, surface->window );
+        }
         release_win_data( data );
     }
     if (offscreen)

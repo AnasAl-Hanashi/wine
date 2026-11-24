@@ -1957,7 +1957,7 @@ static BOOL enable_direct_drawing( struct x11drv_win_data *data, BOOL layered )
     if (layered) return FALSE;
     if (data->embedded) return TRUE; /* draw directly to the window */
     if (data->whole_window == root_window) return TRUE; /* draw directly to the window */
-    if (data->client_window) return TRUE; /* draw directly to the window */
+    if (data->client_window || data->offscreen_surfaces) return TRUE; /* draw directly to the window */
     if (!client_side_graphics) return TRUE; /* draw directly to the window */
     return FALSE;
 }
