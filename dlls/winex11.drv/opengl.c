@@ -1295,7 +1295,7 @@ static BOOL x11drv_pbuffer_create( HDC hdc, int format, SIZE size, BOOL largest,
     }
     gl->drawable = pbuffer;
     SetRect( &rect, 0, 0, gl->base.virtual_size.cx, gl->base.virtual_size.cy );
-    set_dc_drawable( hdc, gl->drawable, &rect, IncludeInferiors );
+    set_dc_drawable( hdc, gl->drawable, &rect, IncludeInferiors, NULL );
 
     TRACE( "new Pbuffer drawable as %p (%lx)\n", gl, gl->drawable );
     *drawable = &gl->base;

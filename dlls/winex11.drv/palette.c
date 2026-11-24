@@ -935,7 +935,7 @@ int X11DRV_PALETTE_ToPhysical( X11DRV_PDEVICE *physDev, COLORREF color )
                 WARN("%s: out of bounds, assuming black\n", debugstr_color(color));
                 return 0;
             }
-            if (mapping) return mapping[idx];
+            if (mapping) return (physDev->depth == 32) ? (mapping[idx] | 0xff000000) : mapping[idx];
             red   = entry.peRed;
             green = entry.peGreen;
             blue  = entry.peBlue;
@@ -978,7 +978,8 @@ int X11DRV_PALETTE_ToPhysical( X11DRV_PDEVICE *physDev, COLORREF color )
                 blue =  blue << (shifts->physicalBlue.scale-8) |
                         blue >> (16-shifts->physicalBlue.scale);
 
-            return (red << shifts->physicalRed.shift) | (green << shifts->physicalGreen.shift) | (blue << shifts->physicalBlue.shift);
+            return (red << shifts->physicalRed.shift) | (green << shifts->physicalGreen.shift) |
+                   (blue << shifts->physicalBlue.shift) | (physDev->depth == 32 ? 0xff000000 : 0);
         }
     }
     else

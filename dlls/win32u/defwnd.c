@@ -1758,6 +1758,10 @@ static void nc_paint( HWND hwnd, HRGN clip )
 
     TRACE( "%p %d\n", hwnd, active );
 
+    /* Custom-chrome / DWM windows extend client area into the caption via WM_NCCALCSIZE;
+     * skip classic non-client painting to keep their 32-bit ARGB resize margins transparent. */
+    if (is_custom_chrome_window( hwnd, style, ex_style )) return;
+
     get_client_rect_rel( hwnd, COORDS_SCREEN, &rectClient, get_thread_dpi() );
 
     hrgn = NtGdiCreateRectRgn( rectClient.left, rectClient.top,
@@ -1780,16 +1784,6 @@ static void nc_paint( HWND hwnd, HRGN clip )
     }
 
     get_window_rect_rel( hwnd, COORDS_WINDOW, &rect, get_thread_dpi() );
-
-    /* Custom-chrome / DWM windows extend client area into the caption via WM_NCCALCSIZE;
-     * clear their exposed non-client resize margins instead of painting classic chrome. */
-    if (is_custom_chrome_window( hwnd, style, ex_style ))
-    {
-        fill_rect( hdc, &rect, GetStockObject( BLACK_BRUSH ));
-        NtUserReleaseDC( hwnd, hdc );
-        return;
-    }
-
     NtGdiGetAppClipBox( hdc, &clip_rect );
 
     NtGdiSelectPen( hdc, get_sys_color_pen( COLOR_WINDOWFRAME ));

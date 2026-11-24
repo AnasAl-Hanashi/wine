@@ -228,7 +228,7 @@ static BOOL needs_offscreen_rendering( HWND hwnd, BOOL raw )
     return FALSE;
 }
 
-void set_dc_drawable( HDC hdc, Drawable drawable, const RECT *rect, int mode )
+void set_dc_drawable( HDC hdc, Drawable drawable, const RECT *rect, int mode, const XVisualInfo *visual )
 {
     struct x11drv_escape_set_drawable escape =
     {
@@ -237,6 +237,7 @@ void set_dc_drawable( HDC hdc, Drawable drawable, const RECT *rect, int mode )
         .dc_rect = *rect,
         .mode = mode,
     };
+    if (visual) escape.visual = *visual;
     NtGdiExtEscape( hdc, NULL, 0, X11DRV_ESCAPE, sizeof(escape), (LPSTR)&escape, 0, NULL );
 }
 
@@ -361,7 +362,7 @@ static void client_surface_update_offscreen( HWND hwnd, struct x11drv_client_sur
         OffsetRect( &rect, -rect.left, -rect.top );
         surface->hdc_dst = NtGdiOpenDCW( &device_str, NULL, NULL, 0, TRUE, NULL, NULL, NULL );
         surface->hdc_src = NtGdiOpenDCW( &device_str, NULL, NULL, 0, TRUE, NULL, NULL, NULL );
-        set_dc_drawable( surface->hdc_src, surface->window, &rect, IncludeInferiors );
+        set_dc_drawable( surface->hdc_src, surface->window, &rect, IncludeInferiors, &surface->visual );
 
 #ifdef SONAME_LIBXCOMPOSITE
         if (usexcomposite) pXCompositeRedirectWindow( gdi_display, surface->window, CompositeRedirectManual );
@@ -424,7 +425,16 @@ static void X11DRV_client_surface_present( struct client_surface *client, HDC hd
            toplevel, wine_dbgstr_rect(&rect_dst), region );
 
     if (get_dc_drawable( surface->hdc_dst, &rect ) != window || !EqualRect( &rect, &rect_dst ))
-        set_dc_drawable( surface->hdc_dst, window, &rect_dst, IncludeInferiors );
+    {
+        XVisualInfo vis = default_visual;
+        struct x11drv_win_data *data;
+        if ((data = get_win_data( toplevel )))
+        {
+            vis = data->vis;
+            release_win_data( data );
+        }
+        set_dc_drawable( surface->hdc_dst, window, &rect_dst, IncludeInferiors, &vis );
+    }
     if (region) NtGdiExtSelectClipRgn( surface->hdc_dst, region, RGN_COPY );
 
     NtGdiStretchBlt( surface->hdc_dst, 0, 0, rect_dst.right - rect_dst.left, rect_dst.bottom - rect_dst.top,
@@ -468,6 +478,7 @@ struct client_surface *X11DRV_CreateClientSurface( HWND hwnd, int format, BOOL r
     if (!colormap) return NULL;
 
     if (!(surface = client_surface_create( &x11drv_client_surface_funcs, hwnd, format, raw ))) goto failed;
+    surface->visual = visual;
     surface->colormap = colormap;
     rect = raw ? surface->client.monitor_rect : surface->client.virtual_rect;
     if (!(surface->window = create_client_window( hwnd, rect, &visual, colormap ))) goto failed;
@@ -513,6 +524,7 @@ static INT X11DRV_ExtEscape( PHYSDEV dev, INT escape, INT in_count, LPCVOID in_d
                     const struct x11drv_escape_set_drawable *data = in_data;
                     physDev->dc_rect = data->dc_rect;
                     physDev->drawable = data->drawable;
+                    if (data->visual.visual) physDev->depth = data->visual.depth;
                     XFreeGC( gdi_display, physDev->gc );
                     physDev->gc = XCreateGC( gdi_display, physDev->drawable, 0, NULL );
                     XSetGraphicsExposures( gdi_display, physDev->gc, False );

@@ -1589,6 +1589,8 @@ struct x11drv_window_surface
     GC                    gc;
     struct x11drv_image  *image;
     BOOL                  byteswap;
+    BOOL                  has_transparent_margins;
+    RECT                  client_rect;
 };
 
 static struct x11drv_window_surface *get_x11_surface( struct window_surface *surface )
@@ -1819,14 +1821,21 @@ static BOOL x11drv_surface_flush( struct window_surface *window_surface, const R
         copy_image_byteswap( color_info, src, dst, width_bytes, width_bytes, dirty->bottom - dirty->top,
                              surface->byteswap, mapping, ~0u, alpha_bits );
     }
-    else if (alpha_bits)
+    else if (alpha_bits || surface->has_transparent_margins)
     {
         int x, y, stride = ximage->bytes_per_line / sizeof(ULONG);
         ULONG *ptr = (ULONG *)dst + dirty->top * stride;
 
         for (y = dirty->top; y < dirty->bottom; y++, ptr += stride)
             for (x = dirty->left; x < dirty->right; x++)
-                ptr[x] |= alpha_bits;
+            {
+                if (surface->has_transparent_margins &&
+                    (x < surface->client_rect.left || x >= surface->client_rect.right ||
+                     y < surface->client_rect.top || y >= surface->client_rect.bottom))
+                    ptr[x] = 0;
+                else
+                    ptr[x] |= alpha_bits;
+            }
     }
 
     if (shape_changed)
@@ -1997,6 +2006,13 @@ BOOL X11DRV_CreateWindowSurface( HWND hwnd, BOOL layered, const RECT *surface_re
                                layered ? data->use_alpha : FALSE );
 
 done:
+    if (*surface && (*surface)->funcs == &x11drv_surface_funcs)
+    {
+        struct x11drv_window_surface *x11_surface = get_x11_surface( *surface );
+        x11_surface->has_transparent_margins = data->custom_chrome;
+        x11_surface->client_rect = data->rects.client;
+        OffsetRect( &x11_surface->client_rect, -data->rects.visible.left, -data->rects.visible.top );
+    }
     release_win_data( data );
     return TRUE;
 }

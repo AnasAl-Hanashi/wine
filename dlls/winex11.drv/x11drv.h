@@ -369,6 +369,7 @@ struct x11drv_client_surface
 {
     struct client_surface client;
     XWindowChanges changes;
+    XVisualInfo visual;
     Colormap colormap;
     Window window;
 
@@ -378,7 +379,7 @@ struct x11drv_client_surface
 
 extern struct x11drv_client_surface *impl_from_client_surface( struct client_surface *client );
 
-extern void set_dc_drawable( HDC hdc, Drawable drawable, const RECT *rect, int mode );
+extern void set_dc_drawable( HDC hdc, Drawable drawable, const RECT *rect, int mode, const XVisualInfo *visual );
 extern Drawable get_dc_drawable( HDC hdc, RECT *rect );
 extern HRGN get_dc_monitor_region( HWND hwnd, HDC hdc );
 
@@ -556,6 +557,7 @@ enum x11drv_atoms
     XATOM__NET_WM_WINDOW_TYPE_UTILITY,
     XATOM__NET_WORKAREA,
     XATOM__GTK_WORKAREAS_D0,
+    XATOM__GTK_FRAME_EXTENTS,
     XATOM__XEMBED,
     XATOM__XEMBED_INFO,
     XATOM_XdndAware,
@@ -689,6 +691,7 @@ struct x11drv_win_data
     UINT        shaped : 1;     /* is window using a custom region shape? */
     UINT        layered : 1;    /* is window layered and with valid attributes? */
     UINT        use_alpha : 1;  /* does window use an alpha channel? */
+    UINT        custom_chrome : 1; /* does window have custom-chrome transparent resize margins? */
     UINT        skip_taskbar : 1; /* does window should be deleted from taskbar */
     UINT        add_taskbar : 1; /* does window should be added to taskbar regardless of style */
     UINT        is_fullscreen : 1; /* is the window visible rect fullscreen */

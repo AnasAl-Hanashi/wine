@@ -3180,6 +3180,50 @@ done:
 /***********************************************************************
  *		WindowPosChanging   (X11DRV.@)
  */
+static BOOL has_custom_chrome_margins( HWND hwnd, const struct window_rects *rects )
+{
+    UINT style = NtUserGetWindowLongW( hwnd, GWL_STYLE );
+    int top_inset = rects->client.top - rects->window.top;
+    int left_inset = rects->client.left - rects->window.left;
+
+    if ((style & WS_CAPTION) != WS_CAPTION || (style & (WS_CHILD | WS_MINIMIZE)))
+        return FALSE;
+    return left_inset > 0 && top_inset <= left_inset;
+}
+
+static void sync_custom_chrome_margins( struct x11drv_win_data *data, UINT style )
+{
+    unsigned long extents[4] = { 0, 0, 0, 0 };
+    int vis_w, vis_h, left, right, top, bottom;
+
+    if (!data->whole_window || !data->custom_chrome) return;
+
+    vis_w  = data->rects.visible.right - data->rects.visible.left;
+    vis_h  = data->rects.visible.bottom - data->rects.visible.top;
+    left   = max( 0, data->rects.client.left - data->rects.visible.left );
+    right  = max( 0, data->rects.visible.right - data->rects.client.right );
+    top    = max( 0, data->rects.client.top - data->rects.visible.top );
+    bottom = max( 0, data->rects.visible.bottom - data->rects.client.bottom );
+
+    if (!(style & WS_MAXIMIZE))
+    {
+        extents[0] = left;
+        extents[1] = right;
+        extents[2] = top;
+        extents[3] = bottom;
+    }
+    XChangeProperty( data->display, data->whole_window, x11drv_atom(_GTK_FRAME_EXTENTS),
+                     XA_CARDINAL, 32, PropModeReplace, (unsigned char *)extents, 4 );
+
+    if (vis_w > 0 && vis_h > 0)
+    {
+        if (left > 0)   XClearArea( data->display, data->whole_window, 0, 0, left, vis_h, False );
+        if (right > 0)  XClearArea( data->display, data->whole_window, vis_w - right, 0, right, vis_h, False );
+        if (top > 0)    XClearArea( data->display, data->whole_window, 0, 0, vis_w, top, False );
+        if (bottom > 0) XClearArea( data->display, data->whole_window, 0, vis_h - bottom, vis_w, bottom, False );
+    }
+}
+
 BOOL X11DRV_WindowPosChanging( HWND hwnd, UINT swp_flags, BOOL shaped, const struct window_rects *rects )
 {
     struct x11drv_win_data *data = get_win_data( hwnd );
@@ -3189,6 +3233,13 @@ BOOL X11DRV_WindowPosChanging( HWND hwnd, UINT swp_flags, BOOL shaped, const str
 
     if (!data && !(data = X11DRV_create_win_data( hwnd, rects ))) return FALSE; /* use default surface */
     data->shaped = shaped;
+    data->custom_chrome = has_custom_chrome_margins( hwnd, rects );
+    if (data->custom_chrome && !data->embedded && !data->layered &&
+        argb_visual.visualid && data->vis.visualid != argb_visual.visualid)
+    {
+        data->rects = *rects;
+        set_window_visual( data, &argb_visual, FALSE );
+    }
 
     ret = !!data->whole_window; /* use default surface if we don't have a window */
     release_win_data( data );
@@ -3327,6 +3378,7 @@ void X11DRV_WindowPosChanged( HWND hwnd, HWND insert_after, HWND owner_hint, UIN
         }
 #endif
     }
+    sync_custom_chrome_margins( data, new_style );
 
     window_set_wm_state( data, get_desired_wm_state( new_style, new_rects ), activate );
     if (!data->wm_state_serial && data->pending_state.wm_state != WithdrawnState)

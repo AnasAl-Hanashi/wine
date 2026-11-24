@@ -575,7 +575,7 @@ static Picture get_no_alpha_mask(void)
         pict = pXRenderCreatePicture( gdi_display, pixmap, pict_formats[WXR_FORMAT_A8R8G8B8],
                                       CPRepeat|CPComponentAlpha, &pa );
         col.red = col.green = col.blue = 0xffff;
-        col.alpha = 0;
+        col.alpha = 0xffff;
         pXRenderFillRectangle( gdi_display, PictOpSrc, pict, &col, 0, 0, 1, 1 );
     }
     pthread_mutex_unlock( &xrender_mutex );
@@ -1662,7 +1662,6 @@ static void xrender_stretch_blit( struct xrender_physdev *physdev_src, struct xr
         NtGdiGetDCDword( physdev_dst->dev.hdc, NtGdiGetBkColor, &bg_color );
         get_xrender_color( physdev_dst, text_color, &fg );
         get_xrender_color( physdev_dst, bg_color, &bg );
-        fg.alpha = bg.alpha = 0;
 
         xrender_mono_blit( src_pict, dst_pict, physdev_dst->format, &fg, &bg,
                            physdev_src->x11dev->dc_rect.left + src->x,
@@ -1802,7 +1801,7 @@ static DWORD xrenderdrv_PutImage( PHYSDEV dev, HRGN clip, BITMAPINFO *info,
     BOOL use_repeat;
 
     dst_format = physdev->format;
-    src_format = get_xrender_format_from_bitmapinfo( info );
+    src_format = get_format_without_alpha( get_xrender_format_from_bitmapinfo( info ) );
     if (!(pict_format = pict_formats[src_format])) goto update_format;
 
     /* make sure we can create an image with the same bpp */

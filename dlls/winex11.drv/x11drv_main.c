@@ -159,6 +159,7 @@ const char * const X11DRV_atom_names[NB_XATOMS - FIRST_XATOM] =
     "_NET_WM_WINDOW_TYPE_UTILITY",
     "_NET_WORKAREA",
     "_GTK_WORKAREAS_D0",
+    "_GTK_FRAME_EXTENTS",
     "_XEMBED",
     "_XEMBED_INFO",
     "XdndAware",
