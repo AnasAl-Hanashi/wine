@@ -3623,6 +3623,9 @@ LRESULT X11DRV_SysCommand( HWND hwnd, WPARAM wparam, LPARAM lparam, const POINT 
     switch (wparam & 0xfff0)
     {
     case SC_MOVE:
+        if ((NtUserGetWindowLongW( hwnd, GWL_EXSTYLE ) & WS_EX_TOOLWINDOW) ||
+            ((NtUserGetWindowLongW( hwnd, GWL_STYLE ) & WS_POPUP) && NtUserGetWindowRelative( hwnd, GW_OWNER )))
+            goto failed;
         if (!hittest) dir = _NET_WM_MOVERESIZE_MOVE_KEYBOARD;
         else dir = _NET_WM_MOVERESIZE_MOVE;
         break;
