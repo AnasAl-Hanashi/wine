@@ -367,6 +367,8 @@ static void client_surface_update_offscreen( HWND hwnd, struct x11drv_client_sur
         else attach_client_window( data, surface->window );
         release_win_data( data );
     }
+    if (offscreen)
+        NtUserRedrawWindow( hwnd, NULL, 0, RDW_INVALIDATE | RDW_ALLCHILDREN );
 }
 
 static void x11drv_client_surface_update( struct client_surface *client )
