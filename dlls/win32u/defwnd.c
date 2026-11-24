@@ -1951,7 +1951,18 @@ LRESULT handle_nc_hit_test( HWND hwnd, POINT pt )
     /* Check borders */
     if (has_thick_frame( style, ex_style ))
     {
-        InflateRect( &rects.window, -get_system_metrics( SM_CXFRAME ), -get_system_metrics( SM_CYFRAME ));
+        int cx = get_system_metrics( SM_CXFRAME );
+        int cy = get_system_metrics( SM_CYFRAME );
+
+        if (rects.client.top <= rects.window.top && !(style & (WS_VSCROLL | WS_HSCROLL)))
+        {
+            rects.window.left   += max( cx, rects.client.left - rects.window.left );
+            rects.window.right  -= max( cx, rects.window.right - rects.client.right );
+            rects.window.top    += cy;
+            rects.window.bottom -= max( cy, rects.window.bottom - rects.client.bottom );
+        }
+        else
+            InflateRect( &rects.window, -cx, -cy );
         if (!PtInRect( &rects.window, pt ))
         {
             /* Check top sizing border */
