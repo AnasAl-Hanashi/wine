@@ -1090,6 +1090,21 @@ void get_sys_popup_pos( HWND hwnd, RECT *rect )
     }
 }
 
+/* Check whether a top-level window uses custom/DWM chrome extending into the caption area. */
+static BOOL is_custom_chrome_window( HWND hwnd, DWORD style, DWORD ex_style )
+{
+    RECT window_rect, client_rect;
+    int caption_height;
+
+    if ((style & WS_CAPTION) != WS_CAPTION || (style & (WS_CHILD | WS_MINIMIZE)))
+        return FALSE;
+
+    caption_height = get_system_metrics( (ex_style & WS_EX_TOOLWINDOW) ? SM_CYSMCAPTION : SM_CYCAPTION );
+    get_window_rect_rel( hwnd, COORDS_SCREEN, &window_rect, get_thread_dpi() );
+    get_client_rect_rel( hwnd, COORDS_SCREEN, &client_rect, get_thread_dpi() );
+    return client_rect.top - window_rect.top < caption_height;
+}
+
 /* Draw a window frame inside the given rectangle, and update the rectangle. */
 static void draw_nc_frame( HDC  hdc, RECT  *rect, BOOL  active, DWORD style, DWORD ex_style )
 {
@@ -1223,6 +1238,8 @@ BOOL draw_nc_sys_button( HWND hwnd, HDC hdc, BOOL down )
         POINT pt;
         DWORD style = get_window_long( hwnd, GWL_STYLE );
         DWORD ex_style = get_window_long( hwnd, GWL_EXSTYLE );
+
+        if (is_custom_chrome_window( hwnd, style, ex_style )) return FALSE;
 
         get_inside_rect( hwnd, COORDS_WINDOW, &rect, style, ex_style );
         pt.x = rect.left + 2;
@@ -1471,6 +1488,8 @@ static void draw_close_button( HWND hwnd, HDC hdc, BOOL down, BOOL grayed )
     DWORD ex_style = get_window_long( hwnd, GWL_EXSTYLE );
     UINT flags = DFCS_CAPTIONCLOSE;
 
+    if (is_custom_chrome_window( hwnd, style, ex_style )) return;
+
     get_inside_rect( hwnd, COORDS_WINDOW, &rect, style, ex_style );
 
     /* A tool window has a smaller Close button */
@@ -1509,6 +1528,7 @@ static void draw_max_button( HWND hwnd, HDC hdc, BOOL down, BOOL grayed )
 
     /* never draw maximize box when window has WS_EX_TOOLWINDOW style */
     if (ex_style & WS_EX_TOOLWINDOW) return;
+    if (is_custom_chrome_window( hwnd, style, ex_style )) return;
 
     flags = (style & WS_MAXIMIZE) ? DFCS_CAPTIONRESTORE : DFCS_CAPTIONMAX;
 
@@ -1532,6 +1552,7 @@ static void draw_min_button( HWND hwnd, HDC hdc, BOOL down, BOOL grayed )
 
     /* never draw minimize box when window has WS_EX_TOOLWINDOW style */
     if (ex_style & WS_EX_TOOLWINDOW) return;
+    if (is_custom_chrome_window( hwnd, style, ex_style )) return;
 
     flags = (style & WS_MINIMIZE) ? DFCS_CAPTIONRESTORE : DFCS_CAPTIONMIN;
 
@@ -1762,17 +1783,11 @@ static void nc_paint( HWND hwnd, HRGN clip )
 
     /* Custom-chrome / DWM windows extend client area into the caption via WM_NCCALCSIZE;
      * clear their exposed non-client resize margins instead of painting classic chrome. */
-    if ((style & WS_CAPTION) == WS_CAPTION && !(style & (WS_CHILD | WS_MINIMIZE)))
+    if (is_custom_chrome_window( hwnd, style, ex_style ))
     {
-        RECT rectWindow;
-        int caption_height = get_system_metrics( (ex_style & WS_EX_TOOLWINDOW) ? SM_CYSMCAPTION : SM_CYCAPTION );
-        get_window_rect_rel( hwnd, COORDS_SCREEN, &rectWindow, get_thread_dpi() );
-        if (rectClient.top - rectWindow.top < caption_height)
-        {
-            fill_rect( hdc, &rect, GetStockObject( BLACK_BRUSH ));
-            NtUserReleaseDC( hwnd, hdc );
-            return;
-        }
+        fill_rect( hdc, &rect, GetStockObject( BLACK_BRUSH ));
+        NtUserReleaseDC( hwnd, hdc );
+        return;
     }
 
     NtGdiGetAppClipBox( hdc, &clip_rect );
@@ -1960,7 +1975,7 @@ LRESULT handle_nc_hit_test( HWND hwnd, POINT pt )
         int cx = get_system_metrics( SM_CXFRAME );
         int cy = get_system_metrics( SM_CYFRAME );
 
-        if (rects.client.top <= rects.window.top && !(style & (WS_VSCROLL | WS_HSCROLL)))
+        if (is_custom_chrome_window( hwnd, style, ex_style ) && !(style & (WS_VSCROLL | WS_HSCROLL)))
         {
             rects.window.left   += max( cx, rects.client.left - rects.window.left );
             rects.window.right  -= max( cx, rects.window.right - rects.client.right );
@@ -2013,7 +2028,7 @@ LRESULT handle_nc_hit_test( HWND hwnd, POINT pt )
     }
 
     /* Check caption */
-    if ((style & WS_CAPTION) == WS_CAPTION)
+    if ((style & WS_CAPTION) == WS_CAPTION && !is_custom_chrome_window( hwnd, style, ex_style ))
     {
         if (ex_style & WS_EX_TOOLWINDOW)
             rects.window.top += get_system_metrics( SM_CYSMCAPTION ) - 1;
