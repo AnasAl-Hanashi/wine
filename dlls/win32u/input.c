@@ -1777,15 +1777,6 @@ static struct mouse_tracking_info *get_mouse_tracking_info(void)
     return thread_info->mouse_tracking_info;
 }
 
-void update_current_mouse_window( HWND hwnd, INT hittest, POINT pos )
-{
-    struct mouse_tracking_info *tracking = get_mouse_tracking_info();
-
-    tracking->last_mouse_message_hwnd = hwnd;
-    tracking->last_mouse_message_hittest = hittest;
-    tracking->last_mouse_message_pos = pos;
-}
-
 static void check_mouse_leave( HWND hwnd, int hittest, struct mouse_tracking_info *tracking )
 {
     if (tracking->info.hwndTrack != hwnd)
@@ -1816,6 +1807,18 @@ static void check_mouse_leave( HWND hwnd, int hittest, struct mouse_tracking_inf
             }
         }
     }
+}
+
+void update_current_mouse_window( HWND hwnd, INT hittest, POINT pos )
+{
+    struct mouse_tracking_info *tracking = get_mouse_tracking_info();
+
+    tracking->last_mouse_message_hwnd = hwnd;
+    tracking->last_mouse_message_hittest = hittest;
+    tracking->last_mouse_message_pos = pos;
+
+    if (tracking->info.dwFlags & TME_LEAVE)
+        check_mouse_leave( hwnd, hittest, tracking );
 }
 
 static HWND get_mouse_window( HWND hwnd, INT *hittest, POINT *ret_pos, struct mouse_tracking_info *tracking )
