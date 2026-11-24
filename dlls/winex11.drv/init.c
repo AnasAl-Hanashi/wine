@@ -319,7 +319,7 @@ static void client_surface_update_offscreen( HWND hwnd, struct x11drv_client_sur
     {
         if (!offscreen && (data = get_win_data( hwnd )))
         {
-            attach_client_window( data, surface->window );
+            if (!data->client_window) attach_client_window( data, surface->window );
             release_win_data( data );
         }
         return;
@@ -386,7 +386,16 @@ static void X11DRV_client_surface_present( struct client_surface *client, HDC hd
     Drawable window;
     HRGN region;
 
-    if (!hdc) return;
+    if (!hdc)
+    {
+        struct x11drv_win_data *data;
+        if (!surface->client.offscreen && (data = get_win_data( hwnd )))
+        {
+            if (data->client_window != surface->window) attach_client_window( data, surface->window );
+            release_win_data( data );
+        }
+        return;
+    }
     window = X11DRV_get_whole_window( toplevel );
 
     /* if window is exclusive fullscreen, ignore the window region clipping rules */
