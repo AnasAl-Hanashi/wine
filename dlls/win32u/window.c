@@ -2243,7 +2243,21 @@ static struct window_surface *get_window_surface( HWND hwnd, UINT swp_flags, BOO
     else monitor_rects = map_window_rects_virt_to_raw( *rects, get_thread_dpi() );
 
     if (!user_driver->pWindowPosChanging( hwnd, swp_flags, shaped, &monitor_rects )) needs_surface = FALSE;
-    else if (is_child) needs_surface = FALSE;
+    else if (is_child)
+    {
+        WND *parent_win = get_win_ptr( parent );
+        if (parent_win == WND_OTHER_PROCESS)
+        {
+            if (swp_flags & SWP_HIDEWINDOW) needs_surface = FALSE;
+            else if (swp_flags & SWP_SHOWWINDOW) needs_surface = TRUE;
+            else needs_surface = !!(style & WS_VISIBLE);
+        }
+        else
+        {
+            if (parent_win) release_win_ptr( parent_win );
+            needs_surface = FALSE;
+        }
+    }
     else if (swp_flags & SWP_HIDEWINDOW) needs_surface = FALSE;
     else if (swp_flags & SWP_SHOWWINDOW) needs_surface = TRUE;
     else needs_surface = !!(style & WS_VISIBLE);
@@ -4206,7 +4220,23 @@ BOOL set_window_pos( WINDOWPOS *winpos, int parent_x, int parent_y )
         {
             HWND parent = NtUserGetAncestor( winpos->hwnd, GA_PARENT );
             if (!parent || parent == get_desktop_window()) parent = winpos->hwnd;
-            erase_now( parent, 0 );
+            if (parent != winpos->hwnd)
+            {
+                WND *parent_win = get_win_ptr( parent );
+                if (parent_win == WND_OTHER_PROCESS)
+                {
+                    NtUserRedrawWindow( parent, NULL, 0, RDW_INVALIDATE | RDW_ALLCHILDREN );
+                }
+                else
+                {
+                    if (parent_win) release_win_ptr( parent_win );
+                    erase_now( parent, 0 );
+                }
+            }
+            else
+            {
+                erase_now( parent, 0 );
+            }
         }
 
         /* Give newly shown windows a chance to redraw */

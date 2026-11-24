@@ -3242,6 +3242,17 @@ BOOL X11DRV_WindowPosChanging( HWND hwnd, UINT swp_flags, BOOL shaped, const str
     }
 
     ret = !!data->whole_window; /* use default surface if we don't have a window */
+    if (!ret && !shaped)
+    {
+        HWND root = NtUserGetAncestor( hwnd, GA_ROOT );
+        DWORD root_pid = 0;
+        if (root && root != hwnd && root != NtUserGetDesktopWindow())
+        {
+            NtUserGetWindowThread( root, &root_pid );
+            if (root_pid && root_pid != GetCurrentProcessId())
+                ret = !!X11DRV_get_whole_window( root );
+        }
+    }
     release_win_data( data );
 
     return ret;
