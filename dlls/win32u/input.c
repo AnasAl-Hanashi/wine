@@ -1986,7 +1986,17 @@ BOOL WINAPI NtUserTrackMouseEvent( TRACKMOUSEEVENT *info )
          * WM_MOUSEMOVE and call TrackMouseEvent before TrackMouseEventProc is
          * called. In such a situation, post the WM_MOUSELEAVE now. */
         if ((tracking->info.dwFlags & TME_LEAVE) && tracking->info.hwndTrack != NULL)
+        {
             check_mouse_leave( hwnd, hittest, tracking );
+            if ((tracking->info.dwFlags & TME_LEAVE) && (info->dwFlags & TME_LEAVE) &&
+                ((tracking->info.dwFlags ^ info->dwFlags) & TME_NONCLIENT))
+            {
+                NtUserPostMessage( tracking->info.hwndTrack,
+                                   (tracking->info.dwFlags & TME_NONCLIENT) ? WM_NCMOUSELEAVE : WM_MOUSELEAVE,
+                                   0, 0 );
+                tracking->info.dwFlags &= ~TME_LEAVE;
+            }
+        }
 
         NtUserKillSystemTimer( tracking->info.hwndTrack, SYSTEM_TIMER_TRACK_MOUSE );
         tracking->info.hwndTrack = 0;
