@@ -1738,6 +1738,17 @@ static void nc_paint( HWND hwnd, HRGN clip )
     TRACE( "%p %d\n", hwnd, active );
 
     get_client_rect_rel( hwnd, COORDS_SCREEN, &rectClient, get_thread_dpi() );
+
+    /* Custom-chrome / DWM windows extend client area to the top edge via WM_NCCALCSIZE;
+     * do not paint classic border/caption over their non-client resize margins. */
+    if ((style & WS_CAPTION) == WS_CAPTION && !(style & (WS_CHILD | WS_MINIMIZE)))
+    {
+        RECT rectWindow;
+        get_window_rect_rel( hwnd, COORDS_SCREEN, &rectWindow, get_thread_dpi() );
+        if (rectClient.top <= rectWindow.top)
+            return;
+    }
+
     hrgn = NtGdiCreateRectRgn( rectClient.left, rectClient.top,
                                rectClient.right, rectClient.bottom );
 
