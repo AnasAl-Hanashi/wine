@@ -141,8 +141,8 @@ static void write_headers( UINT image_size )
 
     put_data( &dos_header, sizeof(dos_header) );
 
-    image_size += nt_header.OptionalHeader.SizeOfHeaders + sizeof(section_header);
-    nt_header.OptionalHeader.SizeOfImage = (image_size + 0x1fff) & ~0x1fff;
+    image_size += SECTION_ALIGNMENT;
+    nt_header.OptionalHeader.SizeOfImage = (image_size + SECTION_ALIGNMENT - 1) & ~(SECTION_ALIGNMENT - 1);
 
     put_data( &nt_header, sizeof(nt_header) );
 
