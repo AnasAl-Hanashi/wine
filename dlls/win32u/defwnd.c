@@ -1739,16 +1739,6 @@ static void nc_paint( HWND hwnd, HRGN clip )
 
     get_client_rect_rel( hwnd, COORDS_SCREEN, &rectClient, get_thread_dpi() );
 
-    /* Custom-chrome / DWM windows extend client area to the top edge via WM_NCCALCSIZE;
-     * do not paint classic border/caption over their non-client resize margins. */
-    if ((style & WS_CAPTION) == WS_CAPTION && !(style & (WS_CHILD | WS_MINIMIZE)))
-    {
-        RECT rectWindow;
-        get_window_rect_rel( hwnd, COORDS_SCREEN, &rectWindow, get_thread_dpi() );
-        if (rectClient.top <= rectWindow.top)
-            return;
-    }
-
     hrgn = NtGdiCreateRectRgn( rectClient.left, rectClient.top,
                                rectClient.right, rectClient.bottom );
 
@@ -1769,6 +1759,22 @@ static void nc_paint( HWND hwnd, HRGN clip )
     }
 
     get_window_rect_rel( hwnd, COORDS_WINDOW, &rect, get_thread_dpi() );
+
+    /* Custom-chrome / DWM windows extend client area into the caption via WM_NCCALCSIZE;
+     * clear their exposed non-client resize margins instead of painting classic chrome. */
+    if ((style & WS_CAPTION) == WS_CAPTION && !(style & (WS_CHILD | WS_MINIMIZE)))
+    {
+        RECT rectWindow;
+        int caption_height = get_system_metrics( (ex_style & WS_EX_TOOLWINDOW) ? SM_CYSMCAPTION : SM_CYCAPTION );
+        get_window_rect_rel( hwnd, COORDS_SCREEN, &rectWindow, get_thread_dpi() );
+        if (rectClient.top - rectWindow.top < caption_height)
+        {
+            fill_rect( hdc, &rect, GetStockObject( BLACK_BRUSH ));
+            NtUserReleaseDC( hwnd, hdc );
+            return;
+        }
+    }
+
     NtGdiGetAppClipBox( hdc, &clip_rect );
 
     NtGdiSelectPen( hdc, get_sys_color_pen( COLOR_WINDOWFRAME ));
