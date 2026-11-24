@@ -2330,7 +2330,7 @@ void attach_client_window( struct x11drv_win_data *data, Window client_window )
 
     detach_client_window( data, data->client_window );
 
-    if (data->whole_window)
+    if (data->whole_window && !(data->layered && data->use_alpha))
     {
         client_window_events_enable( data, client_window );
         XReparentWindow( gdi_display, client_window, data->whole_window, data->rects.client.left - data->rects.visible.left,
@@ -2391,14 +2391,14 @@ Window create_client_window( HWND hwnd, RECT client_rect, const XVisualInfo *vis
 
     XSync( gdi_display, False ); /* make sure whole_window is known from gdi_display */
     ret = data->client_window = XCreateWindow( gdi_display,
-                                               data->whole_window ? data->whole_window : get_dummy_parent(),
+                                               (data->whole_window && !(data->layered && data->use_alpha)) ? data->whole_window : get_dummy_parent(),
                                                x, y, cx, cy, 0, visual->depth, InputOutput,
                                                visual->visual, CWBitGravity | CWWinGravity |
                                                CWBackingStore | CWColormap | CWBorderPixel, &attr );
     if (data->client_window)
     {
         XMapWindow( gdi_display, data->client_window );
-        if (data->whole_window)
+        if (data->whole_window && !(data->layered && data->use_alpha))
         {
             XFlush( gdi_display ); /* make sure client_window is created for XSelectInput */
             client_window_events_enable( data, data->client_window );
