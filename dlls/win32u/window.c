@@ -2143,6 +2143,12 @@ static RECT get_visible_rect( HWND hwnd, BOOL shaped, UINT style, UINT ex_style,
     RECT visible_rect, rect = {0};
 
     if (get_present_rect( hwnd, &rect, get_thread_dpi() )) return rect;
+    if ((style & WS_MAXIMIZE) && (style & WS_CAPTION) == WS_CAPTION &&
+        !(style & (WS_CHILD | WS_MINIMIZE)) && !IsRectEmpty( &rects->client ))
+    {
+        int caption_height = get_system_metrics( (ex_style & WS_EX_TOOLWINDOW) ? SM_CYSMCAPTION : SM_CYCAPTION );
+        if (rects->client.top - rects->window.top < caption_height) return rects->client;
+    }
     if (IsRectEmpty( &rects->window ) || EqualRect( &rects->window, &rects->client ) || shaped || !decorated_mode) return rects->window;
     if (!user_driver->pGetWindowStyleMasks( hwnd, style, ex_style, &style_mask, &ex_style_mask )) return rects->window;
     if (!adjust_window_rect( &rect, style & style_mask, FALSE, ex_style & ex_style_mask, round_dpi( dpi ) )) return rects->window;

@@ -507,6 +507,12 @@ static unsigned long get_mwm_decorations_for_style( DWORD style, DWORD ex_style 
 static unsigned long get_mwm_decorations( struct x11drv_win_data *data, DWORD style, DWORD ex_style )
 {
     if (EqualRect( &data->rects.window, &data->rects.visible )) return 0;
+    if ((style & WS_MAXIMIZE) && (style & WS_CAPTION) == WS_CAPTION &&
+        !(style & (WS_CHILD | WS_MINIMIZE)) && !IsRectEmpty( &data->rects.client ))
+    {
+        int caption_height = NtUserGetSystemMetrics( (ex_style & WS_EX_TOOLWINDOW) ? SM_CYSMCAPTION : SM_CYCAPTION );
+        if (data->rects.client.top - data->rects.window.top < caption_height) return 0;
+    }
     return get_mwm_decorations_for_style( style, ex_style );
 }
 
@@ -945,6 +951,16 @@ static void set_size_hints( struct x11drv_win_data *data, DWORD style )
             size_hints->min_width = size_hints->max_width;
             size_hints->min_height = size_hints->max_height;
             size_hints->flags |= PMinSize | PMaxSize;
+        }
+        else if (data->min_track_size.x > 0 && data->min_track_size.y > 0)
+        {
+            int inset_x = (data->rects.window.right - data->rects.window.left) -
+                          (data->rects.visible.right - data->rects.visible.left);
+            int inset_y = (data->rects.window.bottom - data->rects.window.top) -
+                          (data->rects.visible.bottom - data->rects.visible.top);
+            size_hints->min_width = max( 1, data->min_track_size.x - max( 0, inset_x ) );
+            size_hints->min_height = max( 1, data->min_track_size.y - max( 0, inset_y ) );
+            size_hints->flags |= PMinSize;
         }
     }
 
@@ -3743,6 +3759,22 @@ LRESULT X11DRV_SysCommand( HWND hwnd, WPARAM wparam, LPARAM lparam, const POINT 
     }
 
     release_win_data( data );
+    if ((wparam & 0xfff0) == SC_SIZE)
+    {
+        MINMAXINFO minmax = { 0 };
+        minmax.ptMinTrackSize.x = NtUserGetSystemMetrics( SM_CXMINTRACK );
+        minmax.ptMinTrackSize.y = NtUserGetSystemMetrics( SM_CYMINTRACK );
+        minmax.ptMaxTrackSize.x = NtUserGetSystemMetrics( SM_CXMAXTRACK );
+        minmax.ptMaxTrackSize.y = NtUserGetSystemMetrics( SM_CYMAXTRACK );
+        send_message( hwnd, WM_GETMINMAXINFO, 0, (LPARAM)&minmax );
+        if (minmax.ptMinTrackSize.x > 0 && minmax.ptMinTrackSize.y > 0 && (data = get_win_data( hwnd )))
+        {
+            data->min_track_size = minmax.ptMinTrackSize;
+            set_size_hints( data, NtUserGetWindowLongW( hwnd, GWL_STYLE ) );
+            XFlush( data->display );
+            release_win_data( data );
+        }
+    }
     move_resize_window( hwnd, dir, *pos );
     return 0;
 
