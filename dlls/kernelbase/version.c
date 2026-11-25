@@ -769,8 +769,8 @@ DWORD WINAPI GetFileVersionInfoSizeExW( DWORD flags, LPCWSTR filename, LPDWORD r
         SetLastError(ERROR_BAD_PATHNAME);
         return 0;
     }
-    if (flags & ~FILE_VER_GET_LOCALISED)
-        FIXME("flags 0x%lx ignored\n", flags & ~FILE_VER_GET_LOCALISED);
+    if (flags & ~(FILE_VER_GET_LOCALISED | FILE_VER_GET_NEUTRAL))
+        FIXME("flags 0x%lx ignored\n", flags & ~(FILE_VER_GET_LOCALISED | FILE_VER_GET_NEUTRAL));
 
     if ((hModule = LoadLibraryExW( filename, 0, LOAD_LIBRARY_AS_IMAGE_RESOURCE )))
     {
@@ -874,8 +874,8 @@ BOOL WINAPI GetFileVersionInfoExW( DWORD flags, LPCWSTR filename, DWORD ignored,
         SetLastError(ERROR_INVALID_DATA);
         return FALSE;
     }
-    if (flags & ~FILE_VER_GET_LOCALISED)
-        FIXME("flags 0x%lx ignored\n", flags & ~FILE_VER_GET_LOCALISED);
+    if (flags & ~(FILE_VER_GET_LOCALISED | FILE_VER_GET_NEUTRAL))
+        FIXME("flags 0x%lx ignored\n", flags & ~(FILE_VER_GET_LOCALISED | FILE_VER_GET_NEUTRAL));
 
     if ((hModule = LoadLibraryExW( filename, 0, LOAD_LIBRARY_AS_IMAGE_RESOURCE )))
     {
