@@ -3367,6 +3367,11 @@ void X11DRV_WindowPosChanged( HWND hwnd, HWND insert_after, HWND owner_hint, UIN
     if (!data->whole_window)
     {
         release_win_data( data );
+        if (surface)
+            X11DRV_sync_child_surface( hwnd, surface );
+        if ((swp_flags & (SWP_HIDEWINDOW | SWP_SHOWWINDOW)) ||
+            (swp_flags & (SWP_NOSIZE | SWP_NOMOVE)) != (SWP_NOSIZE | SWP_NOMOVE))
+            X11DRV_sync_cross_process_children( hwnd );
         return;
     }
 
@@ -3403,6 +3408,10 @@ void X11DRV_WindowPosChanged( HWND hwnd, HWND insert_after, HWND owner_hint, UIN
 
     XFlush( data->display );  /* make sure changes are done before we start painting again */
     release_win_data( data );
+
+    if ((swp_flags & (SWP_HIDEWINDOW | SWP_SHOWWINDOW)) ||
+        (swp_flags & (SWP_NOSIZE | SWP_NOMOVE)) != (SWP_NOSIZE | SWP_NOMOVE))
+        X11DRV_sync_cross_process_children( hwnd );
 
     if (was_fullscreen) NtUserClipCursor( NULL );
 }

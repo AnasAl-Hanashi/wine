@@ -1591,25 +1591,19 @@ struct x11drv_window_surface
     BOOL                  byteswap;
     BOOL                  has_transparent_margins;
     RECT                  client_rect;
-    BOOL                  is_host_shared;
     BOOL                  is_child_shared;
+    Window                host_window;
     HWND                  root_hwnd;
-    int                   host_shmid;
-    int                   host_width;
-    int                   host_height;
-    int                   host_bytes_per_line;
-    int                   host_bpp;
-    int                   host_depth;
-    XImage               *host_ximage;
-    x11drv_xshm_info_t    host_shminfo;
+    BOOL                  child_mapped;
+    RECT                  child_geom;
 };
 
-static Atom wine_host_shm_atom;
+static Atom wine_child_hwnd_atom;
 
-static void ensure_host_shm_atom( Display *display )
+static void ensure_child_hwnd_atom( Display *display )
 {
-    if (!wine_host_shm_atom)
-        wine_host_shm_atom = XInternAtom( display, "_WINE_HOST_SURFACE_SHM", False );
+    if (!wine_child_hwnd_atom)
+        wine_child_hwnd_atom = XInternAtom( display, "_WINE_CROSS_PROCESS_CHILD_HWND", False );
 }
 
 static BOOL get_cross_process_root( HWND hwnd, HWND *out_root )
@@ -1626,53 +1620,6 @@ static BOOL get_cross_process_root( HWND hwnd, HWND *out_root )
     return TRUE;
 }
 
-static void publish_host_shm_info( Window window, struct x11drv_image *image, int width, int height )
-{
-#ifdef HAVE_LIBXXSHM
-    long prop[6];
-    if (!window || window == root_window || !image || !image->ximage || image->shminfo.shmid == -1) return;
-    ensure_host_shm_atom( gdi_display );
-    prop[0] = image->shminfo.shmid;
-    prop[1] = width;
-    prop[2] = height;
-    prop[3] = image->ximage->bytes_per_line;
-    prop[4] = image->ximage->bits_per_pixel;
-    prop[5] = (long)GetCurrentProcessId();
-    XChangeProperty( gdi_display, window, wine_host_shm_atom, XA_CARDINAL, 32,
-                     PropModeReplace, (unsigned char *)prop, 6 );
-    XFlush( gdi_display );
-#endif
-}
-
-static void clear_host_shm_info( Window window )
-{
-    if (!window || window == root_window) return;
-    ensure_host_shm_atom( gdi_display );
-    XDeleteProperty( gdi_display, window, wine_host_shm_atom );
-}
-
-static void detach_child_host_shm( struct x11drv_window_surface *surface )
-{
-#ifdef HAVE_LIBXXSHM
-    if (surface->host_ximage)
-    {
-        if (surface->host_shminfo.shmid != -1)
-        {
-            XShmDetach( gdi_display, &surface->host_shminfo );
-            shmdt( surface->host_shminfo.shmaddr );
-        }
-        surface->host_ximage->data = NULL;
-        XDestroyImage( surface->host_ximage );
-        surface->host_ximage = NULL;
-    }
-    surface->host_shmid = -1;
-#endif
-}
-
-#ifdef HAVE_LIBXXSHM
-static int xshm_error_handler( Display *display, XErrorEvent *event, void *arg );
-#endif
-
 static inline void shared_intersect_rect( RECT *dst, const RECT *r1, const RECT *r2 )
 {
     dst->left   = max( r1->left,   r2->left );
@@ -1681,99 +1628,184 @@ static inline void shared_intersect_rect( RECT *dst, const RECT *r1, const RECT 
     dst->bottom = min( r1->bottom, r2->bottom );
 }
 
-static BOOL sync_child_host_shm( struct x11drv_window_surface *surface )
+static Window create_child_shared_window( HWND hwnd, Window host_window )
 {
-#ifdef HAVE_LIBXXSHM
-    Atom actual_type;
-    int actual_format;
-    unsigned long nitems, bytes_after;
-    unsigned char *prop_data = NULL;
-    long *vals;
-    int shmid, w, h, bpl, bpp;
-    void *addr;
-    XImage *ximg;
-    XWindowAttributes attr;
-    Visual *vis = default_visual.visual;
-    int depth = default_visual.depth;
+    XSetWindowAttributes attr;
+    long prop_val;
+    Window win;
 
-    if (!surface->window || surface->window == root_window) return FALSE;
-    ensure_host_shm_atom( gdi_display );
+    attr.colormap         = default_colormap;
+    attr.bit_gravity      = NorthWestGravity;
+    attr.backing_store    = NotUseful;
+    attr.border_pixel     = 0;
+    attr.background_pixel = 0;
+    attr.event_mask       = 0;
 
-    if (XGetWindowProperty( gdi_display, surface->window, wine_host_shm_atom, 0, 6, False,
-                            XA_CARDINAL, &actual_type, &actual_format, &nitems, &bytes_after,
-                            &prop_data ) != Success || !prop_data)
-        return FALSE;
+    win = XCreateWindow( gdi_display, host_window, 0, 0, 1, 1, 0,
+                         default_visual.depth, InputOutput, default_visual.visual,
+                         CWColormap | CWBitGravity | CWBackingStore |
+                         CWBorderPixel | CWBackPixel | CWEventMask, &attr );
+    if (!win) return 0;
 
-    if (actual_type != XA_CARDINAL || actual_format != 32 || nitems < 5)
-    {
-        XFree( prop_data );
-        return FALSE;
-    }
-
-    vals = (long *)prop_data;
-    shmid = (int)vals[0];
-    w     = (int)vals[1];
-    h     = (int)vals[2];
-    bpl   = (int)vals[3];
-    bpp   = (int)vals[4];
-    XFree( prop_data );
-
-    if (shmid == -1 || w <= 0 || h <= 0 || bpl <= 0 || bpp != 32) return FALSE;
-    if (surface->host_ximage && surface->host_shmid == shmid &&
-        surface->host_width == w && surface->host_height == h)
-        return TRUE;
-
-    detach_child_host_shm( surface );
-
-    memset( &surface->host_shminfo, 0, sizeof(surface->host_shminfo) );
-    surface->host_shminfo.shmid = shmid;
-    addr = shmat( shmid, 0, 0 );
-    if (addr == (void *)-1)
-    {
-        surface->host_shmid = -1;
-        return FALSE;
-    }
-
-    if (XGetWindowAttributes( gdi_display, surface->window, &attr ))
-    {
-        vis = attr.visual;
-        depth = attr.depth;
-    }
-
-    ximg = XShmCreateImage( gdi_display, vis, depth, ZPixmap,
-                            addr, &surface->host_shminfo, w, h );
-    if (!ximg)
-    {
-        shmdt( addr );
-        surface->host_shmid = -1;
-        return FALSE;
-    }
-
-    surface->host_shminfo.shmaddr = addr;
-    surface->host_shminfo.readOnly = True;
-    X11DRV_expect_error( gdi_display, xshm_error_handler, NULL );
-    if (!XShmAttach( gdi_display, &surface->host_shminfo ) || X11DRV_check_error())
-    {
-        shmdt( addr );
-        ximg->data = NULL;
-        XDestroyImage( ximg );
-        surface->host_shmid = -1;
-        return FALSE;
-    }
-    XSync( gdi_display, False );
-
-    ximg->data = addr;
-    surface->host_ximage = ximg;
-    surface->host_shmid = shmid;
-    surface->host_width = w;
-    surface->host_height = h;
-    surface->host_bytes_per_line = bpl;
-    surface->host_bpp = bpp;
-    surface->host_depth = depth;
-    return TRUE;
-#else
-    return FALSE;
+#ifdef HAVE_LIBXSHAPE
+    XShapeCombineRectangles( gdi_display, win, ShapeInput, 0, 0, NULL, 0, ShapeSet, YXBanded );
 #endif
+    ensure_child_hwnd_atom( gdi_display );
+    prop_val = (long)(UINT_PTR)hwnd;
+    XChangeProperty( gdi_display, win, wine_child_hwnd_atom, XA_CARDINAL, 32,
+                     PropModeReplace, (unsigned char *)&prop_val, 1 );
+    XFlush( gdi_display );
+    return win;
+}
+
+static BOOL sync_child_shared_window( struct x11drv_window_surface *surface, HWND hwnd,
+                                      RECT *out_form_rc, RECT *out_clip_rc, BOOL *out_full_flush )
+{
+    RECT form_rc, root_rc, clip_rc, anc_rc;
+    HWND cur;
+    UINT dpi;
+    int win_x, win_y, win_w, win_h;
+    BOOL full_flush = FALSE;
+
+    if (out_full_flush) *out_full_flush = FALSE;
+    if (!hwnd || !surface->root_hwnd || !surface->window) return FALSE;
+
+    if (!NtUserIsWindowVisible( hwnd ))
+    {
+        if (surface->child_mapped)
+        {
+            XUnmapWindow( gdi_display, surface->window );
+            XFlush( gdi_display );
+            surface->child_mapped = FALSE;
+        }
+        return FALSE;
+    }
+
+    dpi = NtUserGetDpiForWindow( surface->root_hwnd );
+    if (!NtUserGetWindowRect( hwnd, &form_rc, dpi ) ||
+        !NtUserGetWindowRect( surface->root_hwnd, &root_rc, dpi ))
+        return FALSE;
+
+    clip_rc = form_rc;
+    for (cur = NtUserGetAncestor( hwnd, GA_PARENT );
+         cur && cur != surface->root_hwnd && cur != NtUserGetDesktopWindow();
+         cur = NtUserGetAncestor( cur, GA_PARENT ))
+    {
+        if (NtUserGetWindowRect( cur, &anc_rc, dpi ))
+            shared_intersect_rect( &clip_rc, &clip_rc, &anc_rc );
+    }
+    shared_intersect_rect( &clip_rc, &clip_rc, &root_rc );
+
+    win_x = clip_rc.left - root_rc.left;
+    win_y = clip_rc.top  - root_rc.top;
+    win_w = clip_rc.right  - clip_rc.left;
+    win_h = clip_rc.bottom - clip_rc.top;
+
+    if (win_w <= 0 || win_h <= 0)
+    {
+        if (surface->child_mapped)
+        {
+            XUnmapWindow( gdi_display, surface->window );
+            XFlush( gdi_display );
+            surface->child_mapped = FALSE;
+        }
+        return FALSE;
+    }
+
+    if (win_x != surface->child_geom.left || win_y != surface->child_geom.top ||
+        win_w != surface->child_geom.right - surface->child_geom.left ||
+        win_h != surface->child_geom.bottom - surface->child_geom.top)
+    {
+        XMoveResizeWindow( gdi_display, surface->window, win_x, win_y, win_w, win_h );
+        SetRect( &surface->child_geom, win_x, win_y, win_x + win_w, win_y + win_h );
+        full_flush = TRUE;
+    }
+
+    if (!surface->child_mapped)
+    {
+        XMapRaised( gdi_display, surface->window );
+        surface->child_mapped = TRUE;
+        full_flush = TRUE;
+    }
+
+    if (full_flush) XFlush( gdi_display );
+    if (out_form_rc) *out_form_rc = form_rc;
+    if (out_clip_rc) *out_clip_rc = clip_rc;
+    if (out_full_flush) *out_full_flush = full_flush;
+    return TRUE;
+}
+
+void X11DRV_sync_cross_process_children( HWND hwnd )
+{
+    HWND root = NtUserGetAncestor( hwnd, GA_ROOT );
+    Window host_win, root_ret, parent_ret, *children = NULL;
+    unsigned int i, nchildren = 0;
+
+    if (!root || root == NtUserGetDesktopWindow()) return;
+    host_win = X11DRV_get_whole_window( root );
+    if (!host_win || host_win == root_window) return;
+
+    ensure_child_hwnd_atom( gdi_display );
+    if (!XQueryTree( gdi_display, host_win, &root_ret, &parent_ret, &children, &nchildren ))
+        return;
+
+    for (i = 0; i < nchildren; i++)
+    {
+        Atom actual_type;
+        int actual_format;
+        unsigned long nitems, bytes_after;
+        unsigned char *prop_data = NULL;
+
+        if (XGetWindowProperty( gdi_display, children[i], wine_child_hwnd_atom, 0, 1, False,
+                                XA_CARDINAL, &actual_type, &actual_format, &nitems, &bytes_after,
+                                &prop_data ) == Success && prop_data)
+        {
+            if (actual_type == XA_CARDINAL && actual_format == 32 && nitems >= 1)
+            {
+                HWND child_hwnd = (HWND)(UINT_PTR)(*(long *)prop_data);
+                if (!NtUserIsWindowVisible( child_hwnd ))
+                    XUnmapWindow( gdi_display, children[i] );
+                else
+                {
+                    RECT form_rc, root_rc, clip_rc, anc_rc;
+                    HWND cur;
+                    UINT dpi = NtUserGetDpiForWindow( root );
+
+                    if (NtUserGetWindowRect( child_hwnd, &form_rc, dpi ) &&
+                        NtUserGetWindowRect( root, &root_rc, dpi ))
+                    {
+                        int win_x, win_y, win_w, win_h;
+                        clip_rc = form_rc;
+                        for (cur = NtUserGetAncestor( child_hwnd, GA_PARENT );
+                             cur && cur != root && cur != NtUserGetDesktopWindow();
+                             cur = NtUserGetAncestor( cur, GA_PARENT ))
+                        {
+                            if (NtUserGetWindowRect( cur, &anc_rc, dpi ))
+                                shared_intersect_rect( &clip_rc, &clip_rc, &anc_rc );
+                        }
+                        shared_intersect_rect( &clip_rc, &clip_rc, &root_rc );
+                        win_x = clip_rc.left - root_rc.left;
+                        win_y = clip_rc.top  - root_rc.top;
+                        win_w = clip_rc.right  - clip_rc.left;
+                        win_h = clip_rc.bottom - clip_rc.top;
+                        if (win_w > 0 && win_h > 0)
+                        {
+                            XMoveResizeWindow( gdi_display, children[i], win_x, win_y, win_w, win_h );
+                            XMapRaised( gdi_display, children[i] );
+                        }
+                        else
+                            XUnmapWindow( gdi_display, children[i] );
+                    }
+                    else
+                        XMapRaised( gdi_display, children[i] );
+                    NtUserRedrawWindow( child_hwnd, NULL, 0, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN );
+                }
+            }
+            XFree( prop_data );
+        }
+    }
+    if (children) XFree( children );
+    XFlush( gdi_display );
 }
 
 static struct x11drv_window_surface *get_x11_surface( struct window_surface *surface )
@@ -2042,110 +2074,34 @@ static BOOL x11drv_surface_flush( struct window_surface *window_surface, const R
 
     if (surface->is_child_shared)
     {
-        HWND hwnd = window_surface->hwnd;
-        RECT form_rc, root_rc, clip_rc, anc_rc;
-        HWND cur;
-        UINT dpi;
+        RECT form_rc, clip_rc;
+        BOOL full_flush = FALSE;
 
-        if (!hwnd || !NtUserIsWindowVisible( hwnd ) || !surface->root_hwnd)
-            return TRUE;
-
-        dpi = NtUserGetDpiForWindow( surface->root_hwnd );
-        if (!NtUserGetWindowRect( hwnd, &form_rc, dpi ) ||
-            !NtUserGetWindowRect( surface->root_hwnd, &root_rc, dpi ))
-            return TRUE;
-
-        clip_rc = form_rc;
-        for (cur = NtUserGetAncestor( hwnd, GA_PARENT );
-             cur && cur != surface->root_hwnd && cur != NtUserGetDesktopWindow();
-             cur = NtUserGetAncestor( cur, GA_PARENT ))
+        if (sync_child_shared_window( surface, window_surface->hwnd, &form_rc, &clip_rc, &full_flush ))
         {
-            if (NtUserGetWindowRect( cur, &anc_rc, dpi ))
-                shared_intersect_rect( &clip_rc, &clip_rc, &anc_rc );
-        }
-        shared_intersect_rect( &clip_rc, &clip_rc, &root_rc );
+            int clip_off_x = clip_rc.left - form_rc.left;
+            int clip_off_y = clip_rc.top  - form_rc.top;
+            int win_w = clip_rc.right  - clip_rc.left;
+            int win_h = clip_rc.bottom - clip_rc.top;
+            int x0 = full_flush ? clip_off_x : max( dirty->left,   clip_off_x );
+            int y0 = full_flush ? clip_off_y : max( dirty->top,    clip_off_y );
+            int x1 = full_flush ? clip_off_x + win_w : min( dirty->right,  clip_off_x + win_w );
+            int y1 = full_flush ? clip_off_y + win_h : min( dirty->bottom, clip_off_y + win_h );
 
-        if (clip_rc.right <= clip_rc.left || clip_rc.bottom <= clip_rc.top)
-            return TRUE;
-
-        if (sync_child_host_shm( surface ) && surface->host_ximage && surface->host_ximage->data)
-        {
-            int dst_x = form_rc.left - root_rc.left;
-            int dst_y = form_rc.top  - root_rc.top;
-            int x0 = max( dirty->left,   (clip_rc.left   - root_rc.left) - dst_x );
-            int y0 = max( dirty->top,    (clip_rc.top    - root_rc.top)  - dst_y );
-            int x1 = min( dirty->right,  (clip_rc.right  - root_rc.left) - dst_x );
-            int y1 = min( dirty->bottom, (clip_rc.bottom - root_rc.top)  - dst_y );
-
-            x0 = max( x0, -dst_x );
-            y0 = max( y0, -dst_y );
-            x1 = min( x1, surface->host_width  - dst_x );
-            y1 = min( y1, surface->host_height - dst_y );
-
-            if (x1 > x0 && y1 > y0 && ximage->bits_per_pixel == 32)
-            {
-                int row, copy_bytes = (x1 - x0) * 4;
-                int src_stride = ximage->bytes_per_line;
-                int dst_stride = surface->host_bytes_per_line;
-                const unsigned char *s_ptr = (const unsigned char *)ximage->data + y0 * src_stride + x0 * 4;
-                unsigned char *d_ptr = (unsigned char *)surface->host_ximage->data + (dst_y + y0) * dst_stride + (dst_x + x0) * 4;
-
-                if (surface->host_depth == 32)
-                {
-                    int col, count = x1 - x0;
-                    for (row = y0; row < y1; row++, s_ptr += src_stride, d_ptr += dst_stride)
-                    {
-                        const ULONG *sp = (const ULONG *)s_ptr;
-                        ULONG *dp = (ULONG *)d_ptr;
-                        for (col = 0; col < count; col++)
-                            dp[col] = sp[col] | 0xff000000;
-                    }
-                }
-                else
-                {
-                    for (row = y0; row < y1; row++, s_ptr += src_stride, d_ptr += dst_stride)
-                        memcpy( d_ptr, s_ptr, copy_bytes );
-                }
-
-#ifdef HAVE_LIBXXSHM
-                XShmPutImage( gdi_display, surface->window, surface->gc, surface->host_ximage,
-                              dst_x + x0, dst_y + y0, dst_x + x0, dst_y + y0,
-                              x1 - x0, y1 - y0, False );
-                XFlush( gdi_display );
-#endif
-            }
-        }
-        else
-        {
-            int dst_x = form_rc.left - root_rc.left;
-            int dst_y = form_rc.top  - root_rc.top;
-            int x0 = max( dirty->left,   (clip_rc.left   - root_rc.left) - dst_x );
-            int y0 = max( dirty->top,    (clip_rc.top    - root_rc.top)  - dst_y );
-            int x1 = min( dirty->right,  (clip_rc.right  - root_rc.left) - dst_x );
-            int y1 = min( dirty->bottom, (clip_rc.bottom - root_rc.top)  - dst_y );
-
-            x0 = max( x0, max( 0, -dst_x ));
-            y0 = max( y0, max( 0, -dst_y ));
+            x0 = max( x0, 0 );
+            y0 = max( y0, 0 );
             x1 = min( x1, ximage->width );
             y1 = min( y1, ximage->height );
 
             if (x1 > x0 && y1 > y0)
             {
                 RECT src_dirty = { x0, y0, x1, y1 };
-                RECT dst_rect  = { dst_x, dst_y, dst_x + ximage->width, dst_y + ximage->height };
+                RECT dst_rect  = { -clip_off_x, -clip_off_y, ximage->width - clip_off_x, ximage->height - clip_off_y };
 
-                if (ximage->depth == 32 && ximage->bits_per_pixel == 32)
-                {
-                    int row, col, stride = ximage->bytes_per_line / sizeof(ULONG);
-                    ULONG *ptr = (ULONG *)ximage->data + y0 * stride;
-                    for (row = y0; row < y1; row++, ptr += stride)
-                        for (col = x0; col < x1; col++)
-                            ptr[col] |= 0xff000000;
-                }
                 if (!put_shm_image( ximage, &surface->image->shminfo, surface->window,
                                     surface->gc, &dst_rect, &src_dirty ))
                     XPutImage( gdi_display, surface->window, surface->gc, ximage, x0, y0,
-                               dst_x + x0, dst_y + y0, x1 - x0, y1 - y0 );
+                               x0 - clip_off_x, y0 - clip_off_y, x1 - x0, y1 - y0 );
                 XFlush( gdi_display );
             }
         }
@@ -2170,11 +2126,12 @@ static void x11drv_surface_destroy( struct window_surface *window_surface )
     struct x11drv_window_surface *surface = get_x11_surface( window_surface );
 
     TRACE( "freeing %p\n", surface );
-    if (surface->is_child_shared)
-        detach_child_host_shm( surface );
-    if (surface->is_host_shared)
-        clear_host_shm_info( surface->window );
     if (surface->gc) XFreeGC( gdi_display, surface->gc );
+    if (surface->is_child_shared && surface->window)
+    {
+        XDestroyWindow( gdi_display, surface->window );
+        XFlush( gdi_display );
+    }
     if (surface->image) x11drv_image_destroy( surface->image );
 }
 
@@ -2185,6 +2142,18 @@ static const struct window_surface_funcs x11drv_surface_funcs =
     .flush = x11drv_surface_flush,
     .destroy = x11drv_surface_destroy
 };
+
+void X11DRV_sync_child_surface( HWND hwnd, struct window_surface *window_surface )
+{
+    struct x11drv_window_surface *surface;
+    BOOL geom_changed = FALSE;
+
+    if (!window_surface || window_surface->funcs != &x11drv_surface_funcs) return;
+    surface = get_x11_surface( window_surface );
+    if (!surface->is_child_shared) return;
+    if (sync_child_shared_window( surface, hwnd, NULL, NULL, &geom_changed ) && geom_changed)
+        NtUserRedrawWindow( hwnd, NULL, 0, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN );
+}
 
 /***********************************************************************
  *           create_surface
@@ -2278,9 +2247,9 @@ BOOL X11DRV_CreateWindowSurface( HWND hwnd, BOOL layered, const RECT *surface_re
     struct window_surface *previous;
     struct x11drv_win_data *data;
     HWND root_hwnd = 0;
-    Window target_window;
+    Window target_window, host_window = 0;
     const XVisualInfo *target_vis;
-    BOOL child_shared = FALSE;
+    BOOL child_shared = FALSE, redraw_child = FALSE;
 
     TRACE( "hwnd %p, layered %u, surface_rect %s, surface %p\n", hwnd, layered, wine_dbgstr_rect( surface_rect ), surface );
 
@@ -2290,23 +2259,19 @@ BOOL X11DRV_CreateWindowSurface( HWND hwnd, BOOL layered, const RECT *surface_re
 
     if (!target_window && get_cross_process_root( hwnd, &root_hwnd ))
     {
-        target_window = X11DRV_get_whole_window( root_hwnd );
-        if (target_window && target_window != root_window)
+        host_window = X11DRV_get_whole_window( root_hwnd );
+        if (host_window && host_window != root_window)
         {
-            XWindowAttributes attr;
             child_shared = TRUE;
-            if (XGetWindowAttributes( gdi_display, target_window, &attr ) &&
-                attr.depth == 32 && argb_visual.visualid)
-                target_vis = &argb_visual;
-            else
-                target_vis = &default_visual;
+            target_vis = &default_visual;
         }
     }
 
     if ((previous = *surface) && previous->funcs == &x11drv_surface_funcs)
     {
         struct x11drv_window_surface *prev_x11 = get_x11_surface( previous );
-        if (target_window == prev_x11->window && prev_x11->is_child_shared == child_shared &&
+        if ((child_shared ? (host_window == prev_x11->host_window) : (target_window == prev_x11->window)) &&
+            prev_x11->is_child_shared == child_shared &&
             !enable_direct_drawing( data, layered )) goto done; /* use default surface */
         /* re-create window surface is window has changed, which can happen when changing visual */
         TRACE( "re-creating hwnd %p surface with new window %lx\n", data->hwnd, target_window );
@@ -2324,7 +2289,16 @@ BOOL X11DRV_CreateWindowSurface( HWND hwnd, BOOL layered, const RECT *surface_re
         goto done; /* draw directly to the window */
     }
 
-    if (!target_window)
+    if (child_shared)
+    {
+        target_window = create_child_shared_window( data->hwnd, host_window );
+        if (!target_window)
+        {
+            *surface = NULL;
+            goto done;
+        }
+    }
+    else if (!target_window)
     {
         *surface = NULL;
         goto done;
@@ -2334,21 +2308,20 @@ BOOL X11DRV_CreateWindowSurface( HWND hwnd, BOOL layered, const RECT *surface_re
                                layered ? data->use_alpha : FALSE );
     if (*surface)
     {
-        struct x11drv_window_surface *x11_surf = get_x11_surface( *surface );
-        x11_surf->host_shmid = -1;
         if (child_shared)
         {
+            struct x11drv_window_surface *x11_surf = get_x11_surface( *surface );
             x11_surf->is_child_shared = TRUE;
+            x11_surf->host_window = host_window;
             x11_surf->root_hwnd = root_hwnd;
-            sync_child_host_shm( x11_surf );
+            sync_child_shared_window( x11_surf, data->hwnd, NULL, NULL, NULL );
+            redraw_child = TRUE;
         }
-        else if (!layered && target_window != root_window && x11_surf->image)
-        {
-            x11_surf->is_host_shared = TRUE;
-            publish_host_shm_info( target_window, x11_surf->image,
-                                   surface_rect->right - surface_rect->left,
-                                   surface_rect->bottom - surface_rect->top );
-        }
+    }
+    else if (child_shared)
+    {
+        XDestroyWindow( gdi_display, target_window );
+        XFlush( gdi_display );
     }
 
 done:
@@ -2360,5 +2333,7 @@ done:
         OffsetRect( &x11_surface->client_rect, -data->rects.visible.left, -data->rects.visible.top );
     }
     release_win_data( data );
+    if (redraw_child)
+        NtUserRedrawWindow( hwnd, NULL, 0, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN );
     return TRUE;
 }
