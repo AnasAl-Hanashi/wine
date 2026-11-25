@@ -900,7 +900,10 @@ HRESULT marshal_object(struct apartment *apt, STDOBJREF *stdobjref, REFIID riid,
             if (hr == S_OK) {
                 hr = IPSFactoryBuffer_CreateStub(psfb, riid, manager->object, &stub);
                 IPSFactoryBuffer_Release(psfb);
-                if (hr != S_OK)
+                if (hr == E_NOINTERFACE)
+                    WARN("Failed to create an IRpcStubBuffer from IPSFactory for %s with error %#lx\n",
+                         debugstr_guid(riid), hr);
+                else if (hr != S_OK)
                     ERR("Failed to create an IRpcStubBuffer from IPSFactory for %s with error %#lx\n",
                         debugstr_guid(riid), hr);
             }else {
@@ -1361,14 +1364,14 @@ static HRESULT WINAPI ProxyCliSec_QueryBlanket(IClientSecurity *iface,
                                                void **pAuthInfo,
                                                DWORD *pCapabilities)
 {
-    FIXME("(%p, %p, %p, %p, %p, %p, %p, %p): stub\n", pProxy, pAuthnSvc,
-          pAuthzSvc, ppServerPrincName, pAuthnLevel, pImpLevel, pAuthInfo,
-          pCapabilities);
+    WARN("(%p, %p, %p, %p, %p, %p, %p, %p): stub\n", pProxy, pAuthnSvc,
+         pAuthzSvc, ppServerPrincName, pAuthnLevel, pImpLevel, pAuthInfo,
+         pCapabilities);
 
     if (pAuthnSvc)
-        *pAuthnSvc = 0;
+        *pAuthnSvc = RPC_C_AUTHN_NONE;
     if (pAuthzSvc)
-        *pAuthzSvc = 0;
+        *pAuthzSvc = RPC_C_AUTHZ_NONE;
     if (ppServerPrincName)
         *ppServerPrincName = NULL;
     if (pAuthnLevel)
@@ -1380,7 +1383,7 @@ static HRESULT WINAPI ProxyCliSec_QueryBlanket(IClientSecurity *iface,
     if (pCapabilities)
         *pCapabilities = EOAC_NONE;
 
-    return E_NOTIMPL;
+    return S_OK;
 }
 
 static HRESULT WINAPI ProxyCliSec_SetBlanket(IClientSecurity *iface,

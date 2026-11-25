@@ -2812,7 +2812,7 @@ HRESULT WINAPI CoGetContextToken(ULONG_PTR *token)
 
     if (!(apt = apartment_get_current_or_mta()))
     {
-        ERR("apartment not initialised\n");
+        WARN("apartment not initialised\n");
         return CO_E_NOTINITIALIZED;
     }
 
