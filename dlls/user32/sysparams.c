@@ -822,8 +822,10 @@ DPI_AWARENESS_CONTEXT WINAPI SetThreadDpiAwarenessContext( DPI_AWARENESS_CONTEXT
  */
 DPI_HOSTING_BEHAVIOR WINAPI GetThreadDpiHostingBehavior( void )
 {
-    FIXME("(): stub\n");
-    return DPI_HOSTING_BEHAVIOR_DEFAULT;
+    struct ntuser_thread_info *info = NtUserGetThreadInfo();
+
+    TRACE( "() -> %d\n", info->dpi_hosting_behavior );
+    return info->dpi_hosting_behavior;
 }
 
 /**********************************************************************
@@ -831,8 +833,18 @@ DPI_HOSTING_BEHAVIOR WINAPI GetThreadDpiHostingBehavior( void )
  */
 DPI_HOSTING_BEHAVIOR WINAPI SetThreadDpiHostingBehavior( DPI_HOSTING_BEHAVIOR value )
 {
-    FIXME("(%d): stub\n", value);
-    return DPI_HOSTING_BEHAVIOR_DEFAULT;
+    struct ntuser_thread_info *info = NtUserGetThreadInfo();
+    DPI_HOSTING_BEHAVIOR prev;
+
+    TRACE( "(%d)\n", value );
+    if (value != DPI_HOSTING_BEHAVIOR_DEFAULT && value != DPI_HOSTING_BEHAVIOR_MIXED)
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return DPI_HOSTING_BEHAVIOR_INVALID;
+    }
+    prev = info->dpi_hosting_behavior;
+    info->dpi_hosting_behavior = value;
+    return prev;
 }
 
 /***********************************************************************
