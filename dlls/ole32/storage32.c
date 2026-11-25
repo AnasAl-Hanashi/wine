@@ -8743,7 +8743,8 @@ HRESULT WINAPI StgOpenStorageEx(const WCHAR* pwcsName, DWORD grfMode, DWORD stgf
             ERR("grfAttrs must be 0 or FILE_FLAG_NO_BUFFERING if stgfmt == STGFMT_DOCFILE\n");
             return STG_E_INVALIDPARAMETER;
         }
-        FIXME("Stub: calling StgOpenStorage, but ignoring pStgOptions and grfAttrs\n");
+        if (pStgOptions || grfAttrs)
+            FIXME("Ignoring pStgOptions %p and grfAttrs %#lx\n", pStgOptions, grfAttrs);
         break;
 
     case STGFMT_ANY:
