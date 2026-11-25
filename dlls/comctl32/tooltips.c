@@ -127,6 +127,7 @@ typedef struct
     WCHAR      szTipText[INFOTIPSIZE];
     BOOL     bActive;
     BOOL     bTrackActive;
+    BOOL     bUnicode;
     UINT     uNumTools;
     COLORREF   clrBk;
     COLORREF   clrText;
@@ -1827,6 +1828,7 @@ TOOLTIPS_Create (HWND hwnd)
     /* initialize info structure */
     infoPtr->bActive = TRUE;
     infoPtr->bTrackActive = FALSE;
+    infoPtr->bUnicode = TRUE;
 
     infoPtr->nMaxTipWidth = -1;
     infoPtr->nTool = -1;
@@ -2286,6 +2288,16 @@ TOOLTIPS_WindowProc (HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
 	case WM_WININICHANGE:
 	    return TOOLTIPS_WinIniChange (infoPtr);
+
+	case CCM_GETUNICODEFORMAT:
+	    return infoPtr->bUnicode;
+
+	case CCM_SETUNICODEFORMAT:
+	{
+	    BOOL old = infoPtr->bUnicode;
+	    infoPtr->bUnicode = (wParam != 0);
+	    return old;
+	}
 
 	default:
 	    if ((uMsg >= WM_USER) && (uMsg < WM_APP) && !COMCTL32_IsReflectedMessage(uMsg))
