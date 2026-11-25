@@ -1596,6 +1596,11 @@ static HRGN send_ncpaint( HWND hwnd, HWND *child, UINT *flags )
                 if (style & WS_VSCROLL)
                     set_standard_scroll_painted( hwnd, SB_VERT, FALSE );
 
+                if (whole_rgn > (HRGN)1 && !is_current_process_window( hwnd ))
+                {
+                    NtGdiDeleteObjectApp( whole_rgn );
+                    whole_rgn = (HRGN)1;
+                }
                 send_message( hwnd, WM_NCPAINT, (WPARAM)whole_rgn, 0 );
             }
             if (whole_rgn > (HRGN)1) NtGdiDeleteObjectApp( whole_rgn );
@@ -1620,6 +1625,11 @@ static BOOL send_erase( HWND hwnd, UINT flags, HRGN client_rgn,
     RECT dummy;
 
     if (!clip_rect) clip_rect = &dummy;
+    if (!hdc_ret && (flags & UPDATE_ERASE) && !is_current_process_window( hwnd ))
+    {
+        NtGdiDeleteObjectApp( client_rgn );
+        return TRUE;
+    }
     if (hdc_ret || (flags & UPDATE_ERASE))
     {
         UINT dcx_flags = DCX_INTERSECTRGN | DCX_USESTYLE;
