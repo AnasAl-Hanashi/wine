@@ -1745,3 +1745,23 @@ RPC_BINDING_HANDLE WINAPI I_RpcGetCurrentCallHandle(void)
     TRACE("\n");
     return RPCRT4_GetThreadCurrentCallHandle();
 }
+
+/***********************************************************************
+ *             RpcServerInqCallAttributesA (RPCRT4.@)
+ */
+RPC_STATUS WINAPI RpcServerInqCallAttributesA(RPC_BINDING_HANDLE client_binding, void *attributes)
+{
+    if (!attributes) return ERROR_INVALID_PARAMETER;
+    WARN("(%p, %p) not supported\n", client_binding, attributes);
+    return RPC_S_CANNOT_SUPPORT;
+}
+
+/***********************************************************************
+ *             RpcServerInqCallAttributesW (RPCRT4.@)
+ */
+RPC_STATUS WINAPI RpcServerInqCallAttributesW(RPC_BINDING_HANDLE client_binding, void *attributes)
+{
+    if (!attributes) return ERROR_INVALID_PARAMETER;
+    WARN("(%p, %p) not supported\n", client_binding, attributes);
+    return RPC_S_CANNOT_SUPPORT;
+}
