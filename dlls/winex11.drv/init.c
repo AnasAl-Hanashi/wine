@@ -320,7 +320,7 @@ static void client_surface_update_geometry( HWND hwnd, struct x11drv_client_surf
             OffsetRect( &src_rect, -src_rect.left, -src_rect.top );
             set_dc_drawable( surface->hdc_src, surface->window, &src_rect, IncludeInferiors, &surface->visual );
         }
-        NtUserRedrawWindow( hwnd, NULL, 0, RDW_INVALIDATE | RDW_ALLCHILDREN );
+        NtUserRedrawWindow( hwnd, NULL, 0, RDW_INVALIDATE | RDW_NOCHILDREN );
     }
 }
 
