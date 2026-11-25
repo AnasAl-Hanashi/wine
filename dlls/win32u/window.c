@@ -5762,7 +5762,9 @@ static WND *create_window_handle( HWND parent, HWND owner, UNICODE_STRING *name,
     struct tagCLASS *class = NULL;
     WND *win;
 
-    if (NTUSER_DPI_CONTEXT_IS_MONITOR_AWARE( dpi_context ) && dpi_context != NTUSER_DPI_PER_MONITOR_AWARE)
+    if (NTUSER_DPI_CONTEXT_IS_MONITOR_AWARE( dpi_context ) &&
+        dpi_context != NTUSER_DPI_PER_MONITOR_AWARE &&
+        dpi_context != NTUSER_DPI_PER_MONITOR_AWARE_V2)
     {
         FIXME( "DPI context %#x not implemented\n", dpi_context );
         dpi_context = NTUSER_DPI_PER_MONITOR_AWARE;
