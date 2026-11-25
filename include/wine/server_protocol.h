@@ -1409,6 +1409,7 @@ struct get_thread_info_reply
 #define GET_THREAD_INFO_FLAG_TERMINATED    0x02
 #define GET_THREAD_INFO_FLAG_LAST          0x04
 #define GET_THREAD_INFO_FLAG_DISABLE_BOOST 0x08
+#define GET_THREAD_INFO_FLAG_IO_PENDING    0x10
 
 
 
@@ -7201,6 +7202,6 @@ union generic_reply
     struct alpc_create_port_reply alpc_create_port_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 964
+#define SERVER_PROTOCOL_VERSION 965
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

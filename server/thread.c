@@ -1846,6 +1846,8 @@ DECL_HANDLER(get_thread_info)
             reply->flags |= GET_THREAD_INFO_FLAG_LAST;
         if (thread->disable_boost)
             reply->flags |= GET_THREAD_INFO_FLAG_DISABLE_BOOST;
+        if (thread_has_pending_io( thread ))
+            reply->flags |= GET_THREAD_INFO_FLAG_IO_PENDING;
 
         if (thread->desc && get_reply_max_size())
         {

@@ -655,6 +655,18 @@ static struct async *find_async_from_user( struct process *process, client_ptr_t
     return NULL;
 }
 
+int thread_has_pending_io( struct thread *thread )
+{
+    struct async *async;
+
+    LIST_FOR_EACH_ENTRY( async, &thread->process->asyncs, struct async, process_entry )
+    {
+        if (async->terminated || async->is_system) continue;
+        if (async->thread == thread) return 1;
+    }
+    return 0;
+}
+
 static int cancel_process_async( struct process *process, struct object *obj, struct thread *thread, client_ptr_t iosb, obj_handle_t *wait_handle )
 {
     struct async_cancel *cancel = NULL;
