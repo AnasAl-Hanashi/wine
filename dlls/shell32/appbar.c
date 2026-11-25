@@ -87,6 +87,10 @@ UINT_PTR WINAPI SHAppBarMessage(DWORD msg, PAPPBARDATA data)
         TRACE("edge: %d, rc: %s\n", data->uEdge, wine_dbgstr_rect(&data->rc));
         break;
 
+    case ABM_GETSTATE:
+        TRACE("ABM_GETSTATE\n");
+        break;
+
     case ABM_GETTASKBARPOS:
         TRACE("rc: %s\n", wine_dbgstr_rect(&data->rc));
         break;

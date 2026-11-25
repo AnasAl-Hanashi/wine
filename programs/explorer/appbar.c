@@ -198,17 +198,47 @@ static UINT_PTR handle_appbarmessage(DWORD msg, struct appbar_data_msg *abd)
         }
         return TRUE;
     case ABM_GETSTATE:
-        FIXME( "SHAppBarMessage(ABM_GETSTATE): stub\n" );
-        return ABS_ALWAYSONTOP | ABS_AUTOHIDE;
+        TRACE( "SHAppBarMessage(ABM_GETSTATE)\n" );
+        return ABS_ALWAYSONTOP;
     case ABM_GETTASKBARPOS:
-        FIXME( "SHAppBarMessage(ABM_GETTASKBARPOS, hwnd=%p): stub\n", hwnd );
-        /* Report the taskbar is at the bottom of the screen. */
-        abd->rc.left = 0;
-        abd->rc.right = GetSystemMetrics(SM_CXSCREEN);
-        abd->rc.bottom = GetSystemMetrics(SM_CYSCREEN);
-        abd->rc.top = abd->rc.bottom-1;
+    {
+        int cx = GetSystemMetrics( SM_CXSCREEN );
+        int cy = GetSystemMetrics( SM_CYSCREEN );
+        RECT work;
+
+        TRACE( "SHAppBarMessage(ABM_GETTASKBARPOS, hwnd=%p)\n", hwnd );
+        if (SystemParametersInfoW( SPI_GETWORKAREA, 0, &work, 0 ))
+        {
+            if (work.bottom < cy)
+            {
+                SetRect( &abd->rc, 0, work.bottom, cx, cy );
+                abd->uEdge = ABE_BOTTOM;
+                return TRUE;
+            }
+            if (work.top > 0)
+            {
+                SetRect( &abd->rc, 0, 0, cx, work.top );
+                abd->uEdge = ABE_TOP;
+                return TRUE;
+            }
+            if (work.left > 0)
+            {
+                SetRect( &abd->rc, 0, 0, work.left, cy );
+                abd->uEdge = ABE_LEFT;
+                return TRUE;
+            }
+            if (work.right < cx)
+            {
+                SetRect( &abd->rc, work.right, 0, cx, cy );
+                abd->uEdge = ABE_RIGHT;
+                return TRUE;
+            }
+        }
+        /* Fallback: report a 1px taskbar at the bottom of the screen. */
+        SetRect( &abd->rc, 0, cy - 1, cx, cy );
         abd->uEdge = ABE_BOTTOM;
         return TRUE;
+    }
     case ABM_ACTIVATE:
         return TRUE;
     case ABM_GETAUTOHIDEBAR:
