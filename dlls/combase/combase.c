@@ -3494,8 +3494,12 @@ HRESULT WINAPI CoEnableCallCancellation(void *reserved)
  */
 HRESULT WINAPI CoGetCallerTID(DWORD *tid)
 {
-    FIXME("stub!\n");
-    return E_NOTIMPL;
+    TRACE("(%p)\n", tid);
+
+    if (!tid) return E_INVALIDARG;
+
+    *tid = 0;
+    return S_FALSE;
 }
 
 /***********************************************************************
