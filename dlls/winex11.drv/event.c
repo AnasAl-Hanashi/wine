@@ -647,6 +647,17 @@ static void handle_wm_protocols( HWND hwnd, XClientMessageEvent *event )
       xev.window = DefaultRootWindow(xev.display);
       XSendEvent(xev.display, xev.window, False, SubstructureRedirectMask | SubstructureNotifyMask, (XEvent*)&xev);
     }
+    else if (protocol == x11drv_atom(_NET_WM_SYNC_REQUEST))
+    {
+        struct x11drv_win_data *data;
+        if ((data = get_win_data( hwnd )))
+        {
+            data->sync_lo = (UINT)event->data.l[2];
+            data->sync_hi = (INT)event->data.l[3];
+            data->sync_pending = 1;
+            release_win_data( data );
+        }
+    }
 }
 
 
@@ -993,7 +1004,13 @@ static BOOL X11DRV_ConfigureNotify( HWND hwnd, XEvent *xev )
     SetRect( &rect, pos.x, pos.y, pos.x + size.cx, pos.y + size.cy );
     window_configure_notify( data, event->serial, &rect );
 
-    release_win_data( data );
+    {
+        BOOL finish_sync = data->sync_pending &&
+                           size.cx == data->rects.visible.right - data->rects.visible.left &&
+                           size.cy == data->rects.visible.bottom - data->rects.visible.top;
+        release_win_data( data );
+        if (finish_sync) x11drv_finish_sync_request( hwnd );
+    }
 
     return NtUserPostMessage( hwnd, WM_WINE_WINDOW_STATE_CHANGED, 0, 0 );
 }

@@ -540,6 +540,8 @@ enum x11drv_atoms
     XATOM__NET_WM_NAME,
     XATOM__NET_WM_PID,
     XATOM__NET_WM_PING,
+    XATOM__NET_WM_SYNC_REQUEST,
+    XATOM__NET_WM_SYNC_REQUEST_COUNTER,
     XATOM__NET_WM_STATE,
     XATOM__NET_WM_STATE_ABOVE,
     XATOM__NET_WM_STATE_DEMANDS_ATTENTION,
@@ -699,6 +701,10 @@ struct x11drv_win_data
     UINT        parent_invalid : 1; /* is the parent host window possibly invalid */
     UINT        reparenting : 1; /* window is being reparented, likely from a decoration change */
     UINT        is_resizable : 1; /* window is allowed to be resized by the window manager */
+    UINT        sync_pending : 1; /* _NET_WM_SYNC_REQUEST waiting for frame finish */
+    XID         sync_counter;   /* _NET_WM_SYNC_REQUEST_COUNTER */
+    UINT        sync_lo;
+    INT         sync_hi;
     POINT       min_track_size; /* minimum tracking size from WM_GETMINMAXINFO */
     Window      embedder;       /* window id of embedder */
     Pixmap         icon_pixmap;
@@ -724,6 +730,7 @@ extern struct x11drv_win_data *get_win_data( HWND hwnd );
 extern void release_win_data( struct x11drv_win_data *data );
 extern void set_window_parent( struct x11drv_win_data *data, Window parent );
 extern Window X11DRV_get_whole_window( HWND hwnd );
+extern void x11drv_finish_sync_request( HWND hwnd );
 extern void X11DRV_sync_child_surface( HWND hwnd, struct window_surface *surface );
 extern void X11DRV_sync_cross_process_children( HWND hwnd );
 extern Window get_dummy_parent(void);

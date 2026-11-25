@@ -423,6 +423,7 @@ static void X11DRV_client_surface_present( struct client_surface *client, HDC hd
             if (data->client_window != surface->window) attach_client_window( data, surface->window );
             release_win_data( data );
         }
+        x11drv_finish_sync_request( toplevel );
         return;
     }
     window = X11DRV_get_whole_window( toplevel );
@@ -451,6 +452,7 @@ static void X11DRV_client_surface_present( struct client_surface *client, HDC hd
     NtGdiStretchBlt( surface->hdc_dst, 0, 0, rect_dst.right - rect_dst.left, rect_dst.bottom - rect_dst.top,
                      surface->hdc_src, 0, 0, rect_src.right - rect_src.left, rect_src.bottom - rect_src.top, SRCCOPY, 0 );
     XFlush( gdi_display );
+    x11drv_finish_sync_request( toplevel );
 
     if (region) NtGdiDeleteObjectApp( region );
 }

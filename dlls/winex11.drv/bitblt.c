@@ -2141,6 +2141,7 @@ static BOOL x11drv_surface_flush( struct window_surface *window_surface, const R
                    dirty->right - dirty->left, dirty->bottom - dirty->top );
 
     XFlush( gdi_display );
+    x11drv_finish_sync_request( window_surface->hwnd );
 
     return TRUE;
 }

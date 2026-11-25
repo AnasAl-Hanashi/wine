@@ -40,6 +40,7 @@
 #ifdef HAVE_X11_EXTENSIONS_XINPUT2_H
 #include <X11/extensions/XInput2.h>
 #endif
+#include <X11/extensions/sync.h>
 
 /* avoid conflict with field names in included win32 headers */
 #undef Status
@@ -525,21 +526,30 @@ static unsigned long get_mwm_decorations( struct x11drv_win_data *data, DWORD st
 static int get_window_attributes( struct x11drv_win_data *data, XSetWindowAttributes *attr )
 {
     DWORD ex_style = NtUserGetWindowLongW( data->hwnd, GWL_EXSTYLE );
+    int mask = CWSaveUnder | CWColormap | CWBorderPixel | CWEventMask | CWBitGravity | CWBackingStore;
 
     attr->colormap          = data->whole_colormap ? data->whole_colormap : default_colormap;
     attr->save_under        = ((NtUserGetClassLongW( data->hwnd, GCL_STYLE ) & CS_SAVEBITS) != 0);
     attr->bit_gravity       = NorthWestGravity;
     attr->backing_store     = NotUseful;
     attr->border_pixel      = 0;
-    attr->background_pixel  = 0;
+    if (data->custom_chrome && data->vis.depth == 32 && !data->layered)
+    {
+        attr->background_pixmap = None;
+        mask |= CWBackPixmap;
+    }
+    else
+    {
+        attr->background_pixel = 0;
+        mask |= CWBackPixel;
+    }
     attr->event_mask        = (ExposureMask | KeyPressMask | KeyReleaseMask |
                                FocusChangeMask | KeymapStateMask | StructureNotifyMask | PropertyChangeMask);
     /* for transparent windows, exclude mouse events to allow mouse pass-through */
     if (!(ex_style & WS_EX_TRANSPARENT)) attr->event_mask |= (PointerMotionMask | ButtonPressMask |
                                                               ButtonReleaseMask | EnterWindowMask);
 
-    return (CWSaveUnder | CWColormap | CWBorderPixel | CWBackPixel |
-            CWEventMask | CWBitGravity | CWBackingStore);
+    return mask;
 }
 
 /***********************************************************************
@@ -1167,15 +1177,53 @@ static void set_style_hints( struct x11drv_win_data *data, DWORD style, DWORD ex
 }
 
 
+static BOOL has_xsync( Display *display )
+{
+    static int supported = -1;
+
+    if (supported == -1)
+    {
+        int ev, err;
+        supported = XSyncQueryExtension( display, &ev, &err ) ? 1 : 0;
+    }
+    return supported > 0;
+}
+
+void x11drv_finish_sync_request( HWND hwnd )
+{
+    struct x11drv_win_data *data;
+    XID counter = 0;
+    UINT lo = 0;
+    INT hi = 0;
+
+    if (!hwnd || !(data = get_win_data( hwnd ))) return;
+    if (data->sync_pending && data->sync_counter)
+    {
+        counter = data->sync_counter;
+        lo = data->sync_lo;
+        hi = data->sync_hi;
+        data->sync_pending = 0;
+    }
+    release_win_data( data );
+
+    if (counter)
+    {
+        XSyncValue val;
+        XSyncIntsToValue( &val, lo, hi );
+        XSyncSetCounter( gdi_display, counter, val );
+        XFlush( gdi_display );
+    }
+}
+
 /***********************************************************************
  *              set_initial_wm_hints
  *
  * Set the window manager hints that don't change over the lifetime of a window.
  */
-static void set_initial_wm_hints( Display *display, Window window )
+static void set_initial_wm_hints( Display *display, Window window, XID sync_counter )
 {
     long i;
-    Atom protocols[3];
+    Atom protocols[4];
     Atom dndVersion = WINE_XDND_VERSION;
     XClassHint *class_hints;
 
@@ -1184,6 +1232,7 @@ static void set_initial_wm_hints( Display *display, Window window )
     protocols[i++] = x11drv_atom(WM_DELETE_WINDOW);
     protocols[i++] = x11drv_atom(_NET_WM_PING);
     if (use_take_focus) protocols[i++] = x11drv_atom(WM_TAKE_FOCUS);
+    if (sync_counter) protocols[i++] = x11drv_atom(_NET_WM_SYNC_REQUEST);
     XChangeProperty( display, window, x11drv_atom(WM_PROTOCOLS),
                      XA_ATOM, 32, PropModeReplace, (unsigned char *)protocols, i );
 
@@ -2473,7 +2522,21 @@ static void create_whole_window( struct x11drv_win_data *data )
     data->desired_state.rect = data->current_state.rect;
 
     x11drv_xinput2_enable( data->display, data->whole_window );
-    set_initial_wm_hints( data->display, data->whole_window );
+    if (data->managed && has_xsync( data->display ))
+    {
+        XSyncValue val;
+        XSyncIntToValue( &val, 0 );
+        data->sync_counter = XSyncCreateCounter( data->display, val );
+        if (data->sync_counter)
+        {
+            unsigned long counter = data->sync_counter;
+            XChangeProperty( data->display, data->whole_window,
+                             x11drv_atom(_NET_WM_SYNC_REQUEST_COUNTER),
+                             XA_CARDINAL, 32, PropModeReplace,
+                             (unsigned char *)&counter, 1 );
+        }
+    }
+    set_initial_wm_hints( data->display, data->whole_window, data->sync_counter );
     set_wm_hints( data );
 
     XSaveContext( data->display, data->whole_window, winContext, (char *)data->hwnd );
@@ -2524,6 +2587,12 @@ static void destroy_whole_window( struct x11drv_win_data *data, BOOL already_des
         }
     }
     if (data->whole_colormap) XFreeColormap( data->display, data->whole_colormap );
+    if (data->sync_counter)
+    {
+        XSyncDestroyCounter( data->display, data->sync_counter );
+        data->sync_counter = 0;
+    }
+    data->sync_pending = 0;
     data->whole_window = data->client_window = 0;
     data->whole_colormap = 0;
     data->managed = FALSE;
@@ -2696,7 +2765,7 @@ static BOOL create_desktop_win_data( Window win, HWND hwnd )
     data->whole_window = win;
     window_set_managed( data, TRUE );
     NtUserSetProp( data->hwnd, whole_window_prop, (HANDLE)win );
-    set_initial_wm_hints( display, win );
+    set_initial_wm_hints( display, win, 0 );
     if (is_desktop_fullscreen()) window_set_net_wm_state( data, (1 << NET_WM_STATE_FULLSCREEN) );
     release_win_data( data );
     if (thread_data->clip_window) XReparentWindow( display, thread_data->clip_window, win, 0, 0 );
@@ -3231,12 +3300,18 @@ static void sync_custom_chrome_margins( struct x11drv_win_data *data, UINT style
     XChangeProperty( data->display, data->whole_window, x11drv_atom(_GTK_FRAME_EXTENTS),
                      XA_CARDINAL, 32, PropModeReplace, (unsigned char *)extents, 4 );
 
-    if (vis_w > 0 && vis_h > 0)
+    if (vis_w > 0 && vis_h > 0 && (left > 0 || right > 0 || top > 0 || bottom > 0))
     {
-        if (left > 0)   XClearArea( data->display, data->whole_window, 0, 0, left, vis_h, False );
-        if (right > 0)  XClearArea( data->display, data->whole_window, vis_w - right, 0, right, vis_h, False );
-        if (top > 0)    XClearArea( data->display, data->whole_window, 0, 0, vis_w, top, False );
-        if (bottom > 0) XClearArea( data->display, data->whole_window, 0, vis_h - bottom, vis_w, bottom, False );
+        XGCValues gcv = { .foreground = 0, .subwindow_mode = ClipByChildren };
+        GC gc = XCreateGC( data->display, data->whole_window, GCForeground | GCSubwindowMode, &gcv );
+        if (gc)
+        {
+            if (left > 0)   XFillRectangle( data->display, data->whole_window, gc, 0, 0, left, vis_h );
+            if (right > 0)  XFillRectangle( data->display, data->whole_window, gc, vis_w - right, 0, right, vis_h );
+            if (top > 0)    XFillRectangle( data->display, data->whole_window, gc, 0, 0, vis_w, top );
+            if (bottom > 0) XFillRectangle( data->display, data->whole_window, gc, 0, vis_h - bottom, vis_w, bottom );
+            XFreeGC( data->display, gc );
+        }
     }
 }
 
@@ -3424,6 +3499,9 @@ void X11DRV_WindowPosChanged( HWND hwnd, HWND insert_after, HWND owner_hint, UIN
 
     XFlush( data->display );  /* make sure changes are done before we start painting again */
     release_win_data( data );
+
+    if (!(new_style & WS_VISIBLE) || (new_style & WS_MINIMIZE))
+        x11drv_finish_sync_request( hwnd );
 
     if ((swp_flags & (SWP_HIDEWINDOW | SWP_SHOWWINDOW)) ||
         (swp_flags & (SWP_NOSIZE | SWP_NOMOVE)) != (SWP_NOSIZE | SWP_NOMOVE))
