@@ -311,6 +311,17 @@ static void client_surface_update_geometry( HWND hwnd, struct x11drv_client_surf
     TRACE( "client window %p/%lx, requesting position %d,%d size %d,%d mask %#x\n", hwnd,
            surface->window, changes.x, changes.y, changes.width, changes.height, mask );
     XConfigureWindow( gdi_display, surface->window, mask, &changes );
+
+    if (surface->client.offscreen && (mask & (CWWidth | CWHeight)))
+    {
+        if (surface->hdc_src)
+        {
+            RECT src_rect = surface->client.virtual_rect;
+            OffsetRect( &src_rect, -src_rect.left, -src_rect.top );
+            set_dc_drawable( surface->hdc_src, surface->window, &src_rect, IncludeInferiors, &surface->visual );
+        }
+        NtUserRedrawWindow( hwnd, NULL, 0, RDW_INVALIDATE | RDW_ALLCHILDREN );
+    }
 }
 
 static void client_surface_update_offscreen( HWND hwnd, struct x11drv_client_surface *surface )

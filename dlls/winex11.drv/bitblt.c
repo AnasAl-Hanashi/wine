@@ -1738,10 +1738,15 @@ static BOOL sync_child_shared_window( struct x11drv_window_surface *surface, HWN
 void X11DRV_sync_cross_process_children( HWND hwnd )
 {
     HWND root = NtUserGetAncestor( hwnd, GA_ROOT );
+    DWORD root_pid = 0;
     Window host_win, root_ret, parent_ret, *children = NULL;
     unsigned int i, nchildren = 0;
+    BOOL changed = FALSE;
 
     if (!root || root == NtUserGetDesktopWindow()) return;
+    NtUserGetWindowThread( root, &root_pid );
+    if (root_pid != GetCurrentProcessId()) return;
+
     host_win = X11DRV_get_whole_window( root );
     if (!host_win || host_win == root_window) return;
 
@@ -1763,8 +1768,17 @@ void X11DRV_sync_cross_process_children( HWND hwnd )
             if (actual_type == XA_CARDINAL && actual_format == 32 && nitems >= 1)
             {
                 HWND child_hwnd = (HWND)(UINT_PTR)(*(long *)prop_data);
+                XWindowAttributes attr;
+                BOOL has_attr = !!XGetWindowAttributes( gdi_display, children[i], &attr );
+
                 if (!NtUserIsWindowVisible( child_hwnd ))
-                    XUnmapWindow( gdi_display, children[i] );
+                {
+                    if (!has_attr || attr.map_state != IsUnmapped)
+                    {
+                        XUnmapWindow( gdi_display, children[i] );
+                        changed = TRUE;
+                    }
+                }
                 else
                 {
                     RECT form_rc, root_rc, clip_rc, anc_rc;
@@ -1790,22 +1804,35 @@ void X11DRV_sync_cross_process_children( HWND hwnd )
                         win_h = clip_rc.bottom - clip_rc.top;
                         if (win_w > 0 && win_h > 0)
                         {
-                            XMoveResizeWindow( gdi_display, children[i], win_x, win_y, win_w, win_h );
-                            XMapRaised( gdi_display, children[i] );
+                            if (!has_attr || attr.x != win_x || attr.y != win_y ||
+                                attr.width != win_w || attr.height != win_h ||
+                                attr.map_state != IsViewable)
+                            {
+                                XMoveResizeWindow( gdi_display, children[i], win_x, win_y, win_w, win_h );
+                                XMapRaised( gdi_display, children[i] );
+                                NtUserRedrawWindow( child_hwnd, NULL, 0, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN );
+                                changed = TRUE;
+                            }
                         }
-                        else
+                        else if (!has_attr || attr.map_state != IsUnmapped)
+                        {
                             XUnmapWindow( gdi_display, children[i] );
+                            changed = TRUE;
+                        }
                     }
-                    else
+                    else if (!has_attr || attr.map_state != IsViewable)
+                    {
                         XMapRaised( gdi_display, children[i] );
-                    NtUserRedrawWindow( child_hwnd, NULL, 0, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN );
+                        NtUserRedrawWindow( child_hwnd, NULL, 0, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN );
+                        changed = TRUE;
+                    }
                 }
             }
             XFree( prop_data );
         }
     }
     if (children) XFree( children );
-    XFlush( gdi_display );
+    if (changed) XFlush( gdi_display );
 }
 
 static struct x11drv_window_surface *get_x11_surface( struct window_surface *surface )
@@ -2254,6 +2281,13 @@ BOOL X11DRV_CreateWindowSurface( HWND hwnd, BOOL layered, const RECT *surface_re
     TRACE( "hwnd %p, layered %u, surface_rect %s, surface %p\n", hwnd, layered, wine_dbgstr_rect( surface_rect ), surface );
 
     if (!(data = get_win_data( hwnd ))) return TRUE; /* use default surface */
+
+    if (layered)
+    {
+        data->layered = TRUE;
+        if (!data->embedded && argb_visual.visualid) set_window_visual( data, &argb_visual, TRUE );
+    }
+
     target_window = data->whole_window;
     target_vis = &data->vis;
 
@@ -2278,12 +2312,7 @@ BOOL X11DRV_CreateWindowSurface( HWND hwnd, BOOL layered, const RECT *surface_re
     }
     if (previous) window_surface_release( previous );
 
-    if (layered)
-    {
-        data->layered = TRUE;
-        if (!data->embedded && argb_visual.visualid) set_window_visual( data, &argb_visual, TRUE );
-    }
-    else if (!child_shared && enable_direct_drawing( data, layered ))
+    if (!layered && !child_shared && enable_direct_drawing( data, layered ))
     {
         *surface = NULL;  /* indicate that we want to draw directly to the window */
         goto done; /* draw directly to the window */

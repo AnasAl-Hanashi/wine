@@ -575,11 +575,56 @@ static Picture get_no_alpha_mask(void)
         pict = pXRenderCreatePicture( gdi_display, pixmap, pict_formats[WXR_FORMAT_A8R8G8B8],
                                       CPRepeat|CPComponentAlpha, &pa );
         col.red = col.green = col.blue = 0xffff;
+        col.alpha = 0;
+        pXRenderFillRectangle( gdi_display, PictOpSrc, pict, &col, 0, 0, 1, 1 );
+    }
+    pthread_mutex_unlock( &xrender_mutex );
+    return pict;
+}
+
+/* return a mask picture used to force alpha to 0xff on opaque 32-bit ARGB windows */
+static Picture get_opaque_alpha_mask(void)
+{
+    static Pixmap pixmap;
+    static Picture pict;
+
+    pthread_mutex_lock( &xrender_mutex );
+    if (!pict)
+    {
+        XRenderPictureAttributes pa;
+        XRenderColor col;
+
+        pixmap = XCreatePixmap( gdi_display, root_window, 1, 1, 32 );
+        pa.repeat = RepeatNormal;
+        pa.component_alpha = True;
+        pict = pXRenderCreatePicture( gdi_display, pixmap, pict_formats[WXR_FORMAT_A8R8G8B8],
+                                      CPRepeat|CPComponentAlpha, &pa );
+        col.red = col.green = col.blue = 0xffff;
         col.alpha = 0xffff;
         pXRenderFillRectangle( gdi_display, PictOpSrc, pict, &col, 0, 0, 1, 1 );
     }
     pthread_mutex_unlock( &xrender_mutex );
     return pict;
+}
+
+static BOOL is_layered_window_dc( HDC hdc )
+{
+    HWND hwnd = NtUserWindowFromDC( hdc ), root;
+
+    if (!hwnd) return FALSE;
+    root = NtUserGetAncestor( hwnd, GA_ROOT );
+    if (!root || root == NtUserGetDesktopWindow()) root = hwnd;
+    return !!(NtUserGetWindowLongW( root, GWL_EXSTYLE ) & WS_EX_LAYERED);
+}
+
+static BOOL is_opaque_argb_window_dc( HDC hdc )
+{
+    HWND hwnd = NtUserWindowFromDC( hdc ), root;
+
+    if (!hwnd) return FALSE;
+    root = NtUserGetAncestor( hwnd, GA_ROOT );
+    if (!root || root == NtUserGetDesktopWindow()) root = hwnd;
+    return !(NtUserGetWindowLongW( root, GWL_EXSTYLE ) & WS_EX_LAYERED);
 }
 
 static BOOL fontcmp(LFANDSIZE *p1, LFANDSIZE *p2)
@@ -1671,7 +1716,7 @@ static void xrender_stretch_blit( struct xrender_physdev *physdev_src, struct xr
     else /* color -> color (can be at different depths) or mono -> mono */
     {
         if (physdev_dst->pict_format->depth == 32 && physdev_src->pict_format->depth < 32)
-            mask_pict = get_no_alpha_mask();
+            mask_pict = is_layered_window_dc( physdev_dst->dev.hdc ) ? get_no_alpha_mask() : get_opaque_alpha_mask();
 
         xrender_blit( PictOpSrc, src_pict, mask_pict, dst_pict,
                       physdev_src->x11dev->dc_rect.left + src->x,
@@ -1798,10 +1843,12 @@ static DWORD xrenderdrv_PutImage( PHYSDEV dev, HRGN clip, BITMAPINFO *info,
     XRenderPictFormat *pict_format;
     Pixmap src_pixmap;
     Picture src_pict, mask_pict = 0;
-    BOOL use_repeat;
+    BOOL use_repeat, opaque_dst;
 
     dst_format = physdev->format;
-    src_format = get_format_without_alpha( get_xrender_format_from_bitmapinfo( info ) );
+    opaque_dst = has_alpha( dst_format ) && is_opaque_argb_window_dc( dev->hdc );
+    src_format = get_xrender_format_from_bitmapinfo( info );
+    if (opaque_dst) src_format = get_format_without_alpha( src_format );
     if (!(pict_format = pict_formats[src_format])) goto update_format;
 
     /* make sure we can create an image with the same bpp */
@@ -1814,7 +1861,8 @@ static DWORD xrenderdrv_PutImage( PHYSDEV dev, HRGN clip, BITMAPINFO *info,
 
     if (!bits) return ERROR_SUCCESS;  /* just querying the format */
 
-    if (!has_alpha( src_format ) && has_alpha( dst_format )) mask_pict = get_no_alpha_mask();
+    if (!has_alpha( src_format ) && has_alpha( dst_format ))
+        mask_pict = opaque_dst ? get_opaque_alpha_mask() : get_no_alpha_mask();
 
     ret = create_image_pixmap( info, bits, src, src_format, &src_pixmap, &src_pict, &use_repeat );
     if (!ret)
